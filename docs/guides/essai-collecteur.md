@@ -48,6 +48,27 @@ Ctrl+C pour arrêter ; supprimer le dossier d'essai ensuite.
 - Pages : certains pilotes ne donnent le total qu'en fin de travail ; le collecteur garde la plus grande valeur vue
   (pages comme taille, que le spouleur remet à 0 en sortie de file).
 
+## Service Windows
+
+Sur le serveur d'impression, en PowerShell **administrateur** :
+
+```powershell
+# Dossier du collecteur, configuration lisible par les seuls administrateurs et SYSTEM (elle contient le jeton)
+New-Item -ItemType Directory C:\ProgramData\tirage -Force
+icacls C:\ProgramData\tirage\collecteur.toml /inheritance:r /grant:r "SYSTEM:(R)" "Administrateurs:(F)"
+
+.\tirage-collecteur.exe --installer --config C:\ProgramData\tirage\collecteur.toml
+Start-Service tirage-collecteur
+Get-Content C:\ProgramData\tirage\donnees\journal\collecteur.log -Tail 20
+```
+
+- Compte **LocalSystem**, démarrage **automatique différé**, dépend du spouleur ; redémarrage automatique 60 s après
+  un échec (trois fois, compteur remis à zéro chaque jour).
+- Le journal (`<donnees>\journal\collecteur.log`, 5 Mo puis `.log.1`) ne contient **aucun travail** : démarrage,
+  arrêt, erreurs, état de l'envoi.
+- Retour arrière : `.\tirage-collecteur.exe --desinstaller` (arrête et supprime le service ; données et configuration
+  restent en place, à effacer à la main si voulu).
+
 ## Relevé SNMP d'un copieur (lecture seule)
 
 Les copieurs se déclarent dans un fichier de configuration (modèle : `crates/tirage-collecteur/collecteur.exemple.toml`).

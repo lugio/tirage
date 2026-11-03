@@ -1,15 +1,13 @@
 //! tirage — collecteur du serveur d'impression.
 //!
 //! Modes : `--console` (travaux du spouleur, et envoi au serveur si la configuration en déclare un),
-//! `--releve` et `--parcourir` (copieurs, SNMP en lecture). Le service Windows vient ensuite.
-
-#[cfg(windows)]
-use tirage_collecteur::spouleur;
+//! `--installer` / `--desinstaller` / `--service` (service Windows), `--releve` et `--parcourir` (copieurs, SNMP).
 
 use std::path::PathBuf;
 
 use tirage_collecteur::config::{self, Config};
 use tirage_collecteur::copieurs::{self, Profils};
+use tirage_collecteur::execution::Reglages;
 use tirage_collecteur::spouleur::temps::maintenant_ms;
 use tirage_modele::{Enveloppe, Evenement, PolitiqueNomDocument};
 use tirage_snmp::{Client, Oid, Udp};
@@ -26,6 +24,8 @@ const USAGE: &str = "usage :
   tirage-collecteur --version
   tirage-collecteur --console [--config FICHIER] [--donnees DOSSIER] [--collecteur NOM]
                     [--nom-document non|application|complet]
+  tirage-collecteur --installer --config FICHIER      (administrateur)
+  tirage-collecteur --desinstaller                    (administrateur)
   tirage-collecteur --releve --config FICHIER [--copieur NOM]
   tirage-collecteur --parcourir OID --config FICHIER --copieur NOM [--max N]
 
@@ -33,6 +33,8 @@ const USAGE: &str = "usage :
             dans la file d'attente (DOSSIER/a-envoyer). Avec --config et une section [serveur], la file est
             envoyée au serveur en continu. Ctrl+C pour arrêter : rien de déposé n'est perdu.
             Les options de la ligne de commande l'emportent sur la configuration.
+--installer : enregistre le service Windows « tirage-collecteur » (LocalSystem, démarrage automatique différé,
+              redémarrage après échec) avec cette configuration ; --desinstaller l'arrête et le supprime.
 --releve    : relève une fois chaque copieur de la configuration (ou celui nommé) et affiche le relevé (JSON).
 --parcourir : liste les valeurs SNMP d'un sous-arbre d'un copieur (ex. 1.3.6.1.4.1.<entreprise>), pour écrire
               un profil de marque. Lecture seule ; la communauté vient de la configuration, jamais de la ligne.";
@@ -72,17 +74,8 @@ fn lire_options(args: &[String]) -> Result<OptionsConsole, String> {
     Ok(o)
 }
 
-/// Réglages effectifs du mode console : ligne de commande, puis configuration, puis valeurs par défaut.
-#[derive(Debug)]
-#[cfg_attr(not(windows), allow(dead_code))]
-struct Reglages {
-    donnees: PathBuf,
-    collecteur: String,
-    politique: PolitiqueNomDocument,
-    serveur: Option<config::Serveur>,
-}
-
 fn resoudre(o: OptionsConsole) -> Result<Reglages, String> {
+    // Ligne de commande, puis configuration, puis valeurs par défaut.
     let cfg = o.config.as_deref().map(Config::charger).transpose()?;
     let (c_donnees, c_collecteur, c_politique, serveur) = match cfg {
         Some(c) => (c.donnees, Some(c.collecteur), Some(c.nom_document), c.serveur),
@@ -119,6 +112,11 @@ fn main() {
                 std::process::exit(2);
             }
         },
+        Some("--service") | Some("--installer") => match (args.get(1).map(String::as_str), args.get(2)) {
+            (Some("--config"), Some(f)) if args.len() == 3 => terminer(service(&args[0], PathBuf::from(f))),
+            _ => terminer(Err(Erreur::Usage(format!("{} --config FICHIER", args[0])))),
+        },
+        Some("--desinstaller") if args.len() == 1 => terminer(service("--desinstaller", PathBuf::new())),
         Some("--releve") => {
             terminer(lire_snmp(&args[1..], None).and_then(|o| releve(&o).map_err(Into::into)))
         }
@@ -282,65 +280,32 @@ fn parcourir(o: &OptionsSnmp) -> Result<(), String> {
     Ok(())
 }
 
-/// Événements gardés au plus dans la file (serveur injoignable longtemps).
-#[cfg(windows)]
-const CAPACITE: usize = 100_000;
-
 #[cfg(windows)]
 fn console(o: &Reglages) -> Result<(), Box<dyn std::error::Error>> {
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
-    use tirage_collecteur::envoi;
+    use tirage_collecteur::journal::Journal;
 
-    let mut file = tirage_file::FileAttente::ouvrir(&o.donnees, CAPACITE)?;
-    eprintln!(
-        "{} — surveillance du spouleur ; file : {} élément(s) en attente",
-        texte_version(),
-        file.longueur()
-    );
-    let arret = Arc::new(AtomicBool::new(false));
-    match &o.serveur {
-        Some(s) => {
-            let mut http = envoi::Http::nouveau(s)?;
-            let (donnees, arret) = (o.donnees.clone(), Arc::clone(&arret));
-            eprintln!("envoi au serveur : {}", s.url);
-            std::thread::spawn(move || {
-                let r = envoi::boucle(
-                    &donnees,
-                    CAPACITE,
-                    &mut http,
-                    envoi::Rythme::default(),
-                    &arret,
-                    |m| eprintln!("envoi : {m}"),
-                );
-                if let Err(e) = r {
-                    eprintln!("envoi arrêté : {e}");
-                }
-            });
-        }
-        None => eprintln!("pas de serveur configuré : les travaux restent dans la file"),
+    // Le mode console journalise à l'écran ET dans le fichier du service, pour retrouver un essai.
+    let journal = Arc::new(Journal::fichier(&o.chemin_journal(), true)?);
+    tirage_collecteur::execution::executer(o, &Arc::new(AtomicBool::new(false)), &journal, true)?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn service(mode: &str, config: PathBuf) -> Result<(), Erreur> {
+    use tirage_collecteur::service;
+    match mode {
+        "--service" => service::lancer(config),
+        "--installer" => service::installer(&config),
+        _ => service::desinstaller(),
     }
-    let mut erreur: Option<String> = None;
-    spouleur::windows::surveiller(&arret, |suivi| {
-        for brut in suivi.prendre_termines() {
-            let Some(t) = spouleur::suivi::convertir(&brut, &o.collecteur, o.politique) else {
-                eprintln!(
-                    "travail n° {} inexploitable (sans file ni utilisateur), ignoré",
-                    brut.numero
-                );
-                continue;
-            };
-            let e = Enveloppe::nouvelle(Evenement::Travail(t));
-            println!("{}", String::from_utf8_lossy(&e.encoder()));
-            if let Err(err) = file.deposer(&e.encoder()) {
-                erreur.get_or_insert_with(|| err.to_string());
-            }
-        }
-    })?;
-    match erreur {
-        Some(e) => Err(e.into()),
-        None => Ok(()),
-    }
+    .map_err(Erreur::Echec)
+}
+
+#[cfg(not(windows))]
+fn service(_mode: &str, _config: PathBuf) -> Result<(), Erreur> {
+    Err(Erreur::Echec("le service n'existe que sous Windows".into()))
 }
 
 #[cfg(not(windows))]

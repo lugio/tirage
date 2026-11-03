@@ -10,6 +10,7 @@
 - Relevé des copieurs (`tirage-collecteur --releve`) : identité, compteurs selon un profil de marque en fichier TOML (repli Printer-MIB), consommables, état et alertes (Host-Resources, Printer-MIB) ; `--parcourir` pour écrire un profil ; configuration du collecteur (`collecteur.exemple.toml`).
 - Serveur de réception (`tirage-serveur --config`) : `POST /api/v1/evenements`, jeton par collecteur (seule son empreinte est configurée ; `--nouveau-jeton`), base SQLite versionnée, idempotence (un travail renvoyé n'est jamais compté deux fois), refus par élément sans bloquer le lot.
 - Envoi par le collecteur (`--console --config`) : fil dédié qui vide la file vers le serveur en HTTPS (magasin de certificats du système ou autorité fournie ; `http://` refusé sauf essai), acquittés retirés, refusés mis de côté, délai croissant si le serveur est injoignable. Essai de bout en bout collecteur → serveur.
+- Service Windows du collecteur (`--installer`, `--desinstaller`, `--service`) : LocalSystem, démarrage automatique différé après le spouleur, redémarrage après échec, arrêt propre (le fil d'envoi termine). Journal de fonctionnement horodaté sans aucune donnée de travail, taille bornée.
 
 ### Corrigé
 - La taille d'un travail ne retombe plus à 0 quand le spouleur le retire de la file.
