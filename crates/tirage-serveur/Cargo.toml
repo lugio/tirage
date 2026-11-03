@@ -19,6 +19,8 @@ sha2 = "0.10"
 getrandom = "0.3"
 
 [dev-dependencies]
+tirage-collecteur = { path = "../tirage-collecteur" }
+tirage-file = { path = "../tirage-file" }
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"

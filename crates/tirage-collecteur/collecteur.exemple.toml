@@ -1,8 +1,16 @@
 # Configuration du collecteur — EXEMPLE (valeurs fictives).
 # Le vrai fichier vit sur le serveur d'impression, lisible par le seul compte du service : il contient
-# la communauté SNMP des copieurs.
+# le jeton du collecteur et la communauté SNMP des copieurs.
 
 collecteur = "impression-1"
+donnees = 'C:\ProgramData\tirage\donnees'
+# Titre des documents : "non", "application" (défaut) ou "complet".
+nom_document = "application"
+
+[serveur]
+url = "https://tirage.example.org"
+jeton = "jeton-exemple-a-remplacer"
+# ca = 'C:\ProgramData\tirage\autorite.pem'   # si le certificat du serveur n'est pas reconnu par Windows
 
 [snmp]
 delai_ms = 2000

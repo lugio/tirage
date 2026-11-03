@@ -1,7 +1,7 @@
 //! tirage — collecteur du serveur d'impression.
 //!
-//! Modes d'essai : `--console` (travaux du spouleur), `--releve` et `--parcourir` (copieurs, SNMP en lecture).
-//! Le service Windows et l'envoi au serveur viennent ensuite.
+//! Modes : `--console` (travaux du spouleur, et envoi au serveur si la configuration en déclare un),
+//! `--releve` et `--parcourir` (copieurs, SNMP en lecture). Le service Windows vient ensuite.
 
 #[cfg(windows)]
 use tirage_collecteur::spouleur;
@@ -24,29 +24,29 @@ fn texte_version() -> String {
 
 const USAGE: &str = "usage :
   tirage-collecteur --version
-  tirage-collecteur --console [--donnees DOSSIER] [--collecteur NOM] [--nom-document non|application|complet]
+  tirage-collecteur --console [--config FICHIER] [--donnees DOSSIER] [--collecteur NOM]
+                    [--nom-document non|application|complet]
   tirage-collecteur --releve --config FICHIER [--copieur NOM]
   tirage-collecteur --parcourir OID --config FICHIER --copieur NOM [--max N]
 
 --console : surveille le spouleur local, affiche chaque travail terminé (une ligne JSON) et le dépose
-            dans la file d'attente (DOSSIER/a-envoyer). Ctrl+C pour arrêter : rien de déposé n'est perdu.
+            dans la file d'attente (DOSSIER/a-envoyer). Avec --config et une section [serveur], la file est
+            envoyée au serveur en continu. Ctrl+C pour arrêter : rien de déposé n'est perdu.
+            Les options de la ligne de commande l'emportent sur la configuration.
 --releve    : relève une fois chaque copieur de la configuration (ou celui nommé) et affiche le relevé (JSON).
 --parcourir : liste les valeurs SNMP d'un sous-arbre d'un copieur (ex. 1.3.6.1.4.1.<entreprise>), pour écrire
               un profil de marque. Lecture seule ; la communauté vient de la configuration, jamais de la ligne.";
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Default)]
 struct OptionsConsole {
-    donnees: PathBuf,
-    collecteur: String,
-    politique: PolitiqueNomDocument,
+    config: Option<PathBuf>,
+    donnees: Option<PathBuf>,
+    collecteur: Option<String>,
+    politique: Option<PolitiqueNomDocument>,
 }
 
 fn lire_options(args: &[String]) -> Result<OptionsConsole, String> {
-    let mut o = OptionsConsole {
-        donnees: PathBuf::from("donnees"),
-        collecteur: "collecteur".into(),
-        politique: PolitiqueNomDocument::default(),
-    };
+    let mut o = OptionsConsole::default();
     let mut i = args.iter();
     while let Some(a) = i.next() {
         let mut valeur = || {
@@ -55,15 +55,16 @@ fn lire_options(args: &[String]) -> Result<OptionsConsole, String> {
                 .ok_or_else(|| format!("valeur manquante après {a}"))
         };
         match a.as_str() {
-            "--donnees" => o.donnees = PathBuf::from(valeur()?),
-            "--collecteur" => o.collecteur = valeur()?,
+            "--config" => o.config = Some(PathBuf::from(valeur()?)),
+            "--donnees" => o.donnees = Some(PathBuf::from(valeur()?)),
+            "--collecteur" => o.collecteur = Some(valeur()?),
             "--nom-document" => {
-                o.politique = match valeur()?.as_str() {
+                o.politique = Some(match valeur()?.as_str() {
                     "non" => PolitiqueNomDocument::Non,
                     "application" => PolitiqueNomDocument::Application,
                     "complet" => PolitiqueNomDocument::Complet,
                     v => return Err(format!("--nom-document : valeur inconnue « {v} »")),
-                }
+                })
             }
             autre => return Err(format!("option inconnue : {autre}")),
         }
@@ -71,11 +72,42 @@ fn lire_options(args: &[String]) -> Result<OptionsConsole, String> {
     Ok(o)
 }
 
+/// Réglages effectifs du mode console : ligne de commande, puis configuration, puis valeurs par défaut.
+#[derive(Debug)]
+#[cfg_attr(not(windows), allow(dead_code))]
+struct Reglages {
+    donnees: PathBuf,
+    collecteur: String,
+    politique: PolitiqueNomDocument,
+    serveur: Option<config::Serveur>,
+}
+
+fn resoudre(o: OptionsConsole) -> Result<Reglages, String> {
+    let cfg = o.config.as_deref().map(Config::charger).transpose()?;
+    let (c_donnees, c_collecteur, c_politique, serveur) = match cfg {
+        Some(c) => (c.donnees, Some(c.collecteur), Some(c.nom_document), c.serveur),
+        None => (None, None, None, None),
+    };
+    let collecteur = o
+        .collecteur
+        .or(c_collecteur)
+        .unwrap_or_else(|| "collecteur".into());
+    Ok(Reglages {
+        donnees: o
+            .donnees
+            .or(c_donnees)
+            .unwrap_or_else(|| PathBuf::from("donnees")),
+        collecteur,
+        politique: o.politique.or(c_politique).unwrap_or_default(),
+        serveur,
+    })
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("--version") | Some("-V") => println!("{}", texte_version()),
-        Some("--console") => match lire_options(&args[1..]) {
+        Some("--console") => match lire_options(&args[1..]).and_then(resoudre) {
             Ok(o) => {
                 if let Err(e) = console(&o) {
                     eprintln!("erreur : {e}");
@@ -250,17 +282,44 @@ fn parcourir(o: &OptionsSnmp) -> Result<(), String> {
     Ok(())
 }
 
+/// Événements gardés au plus dans la file (serveur injoignable longtemps).
 #[cfg(windows)]
-fn console(o: &OptionsConsole) -> Result<(), Box<dyn std::error::Error>> {
-    use std::sync::atomic::AtomicBool;
+const CAPACITE: usize = 100_000;
 
-    let mut file = tirage_file::FileAttente::ouvrir(&o.donnees, 100_000)?;
+#[cfg(windows)]
+fn console(o: &Reglages) -> Result<(), Box<dyn std::error::Error>> {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+    use tirage_collecteur::envoi;
+
+    let mut file = tirage_file::FileAttente::ouvrir(&o.donnees, CAPACITE)?;
     eprintln!(
         "{} — surveillance du spouleur ; file : {} élément(s) en attente",
         texte_version(),
         file.longueur()
     );
-    let arret = AtomicBool::new(false);
+    let arret = Arc::new(AtomicBool::new(false));
+    match &o.serveur {
+        Some(s) => {
+            let mut http = envoi::Http::nouveau(s)?;
+            let (donnees, arret) = (o.donnees.clone(), Arc::clone(&arret));
+            eprintln!("envoi au serveur : {}", s.url);
+            std::thread::spawn(move || {
+                let r = envoi::boucle(
+                    &donnees,
+                    CAPACITE,
+                    &mut http,
+                    envoi::Rythme::default(),
+                    &arret,
+                    |m| eprintln!("envoi : {m}"),
+                );
+                if let Err(e) = r {
+                    eprintln!("envoi arrêté : {e}");
+                }
+            });
+        }
+        None => eprintln!("pas de serveur configuré : les travaux restent dans la file"),
+    }
     let mut erreur: Option<String> = None;
     spouleur::windows::surveiller(&arret, |suivi| {
         for brut in suivi.prendre_termines() {
@@ -285,7 +344,7 @@ fn console(o: &OptionsConsole) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[cfg(not(windows))]
-fn console(_o: &OptionsConsole) -> Result<(), Box<dyn std::error::Error>> {
+fn console(_o: &Reglages) -> Result<(), Box<dyn std::error::Error>> {
     Err("le mode console lit le spouleur Windows : il ne fonctionne que sous Windows".into())
 }
 
@@ -304,9 +363,10 @@ mod tests {
 
     #[test]
     fn options_par_defaut() {
-        let o = lire_options(&[]).unwrap();
-        assert_eq!(o.politique, PolitiqueNomDocument::Application);
-        assert_eq!(o.donnees, PathBuf::from("donnees"));
+        let r = resoudre(lire_options(&[]).unwrap()).unwrap();
+        assert_eq!(r.politique, PolitiqueNomDocument::Application);
+        assert_eq!(r.donnees, PathBuf::from("donnees"));
+        assert!(r.serveur.is_none());
     }
 
     #[test]
@@ -320,14 +380,32 @@ mod tests {
             "complet",
         ]))
         .unwrap();
+        let r = resoudre(o).unwrap();
         assert_eq!(
-            o,
-            OptionsConsole {
-                donnees: PathBuf::from("D"),
-                collecteur: "impression-1".into(),
-                politique: PolitiqueNomDocument::Complet
-            }
+            (r.donnees, r.collecteur.as_str(), r.politique),
+            (PathBuf::from("D"), "impression-1", PolitiqueNomDocument::Complet)
         );
+    }
+
+    #[test]
+    fn configuration_puis_ligne_de_commande() {
+        let d = tempfile::tempdir().unwrap();
+        let f = d.path().join("c.toml");
+        std::fs::write(
+            &f,
+            "collecteur = \"impression-1\"\ndonnees = \"D1\"\nnom_document = \"non\"\n[serveur]\nurl = \"https://x\"\njeton = \"j\"\n",
+        )
+        .unwrap();
+        let chemin = f.to_string_lossy().into_owned();
+        let r = resoudre(lire_options(&v(&["--config", &chemin])).unwrap()).unwrap();
+        assert_eq!(
+            (r.collecteur.as_str(), r.politique),
+            ("impression-1", PolitiqueNomDocument::Non)
+        );
+        assert_eq!(r.donnees, PathBuf::from("D1"));
+        assert!(r.serveur.is_some());
+        let r = resoudre(lire_options(&v(&["--config", &chemin, "--donnees", "D2"])).unwrap()).unwrap();
+        assert_eq!(r.donnees, PathBuf::from("D2"), "la ligne de commande l'emporte");
     }
 
     #[test]

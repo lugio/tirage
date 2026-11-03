@@ -11,6 +11,7 @@ publish.workspace = true
 tirage-modele = { path = "../tirage-modele" }
 tirage-snmp = { path = "../tirage-snmp" }
 serde = { workspace = true }
+ureq = { version = "3", default-features = false, features = ["rustls-no-provider", "_ring", "platform-verifier"] }
 toml = { version = "0.9", default-features = false, features = ["parse", "serde", "std"] }
 
 [dev-dependencies]
@@ -21,6 +22,7 @@ workspace = true
 
 [dependencies.serde_json]
 workspace = true
+features = ["raw_value"]
 
 [dependencies.tirage-file]
 path = "../tirage-file"

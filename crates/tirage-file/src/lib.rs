@@ -96,6 +96,10 @@ impl FileAttente {
     /// Dépose un élément ; renvoie son identifiant. L'élément est sur disque au retour.
     pub fn deposer(&mut self, octets: &[u8]) -> Result<u64, ErreurFile> {
         if self.longueur >= self.capacite {
+            // Un autre lecteur (le fil d'envoi) a pu acquitter entre-temps : recompter sur le disque.
+            self.longueur = self.compter()?;
+        }
+        if self.longueur >= self.capacite {
             return Err(ErreurFile::Pleine {
                 capacite: self.capacite,
             });
@@ -157,6 +161,13 @@ impl FileAttente {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(e.into()),
         }
+    }
+
+    fn compter(&self) -> Result<usize, ErreurFile> {
+        Ok(fs::read_dir(&self.dossier)?
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().and_then(|e| e.to_str()) == Some(EXT) && id_du_chemin(p).is_some())
+            .count())
     }
 
     fn chemin(&self, id: u64) -> PathBuf {
@@ -265,6 +276,20 @@ mod tests {
         assert!(matches!(f.deposer(b"3"), Err(ErreurFile::Pleine { capacite: 2 })));
         f.acquitter(1).unwrap();
         f.deposer(b"3").unwrap();
+    }
+
+    #[test]
+    fn deux_lecteurs_sur_la_meme_file() {
+        // Le fil de dépôt et le fil d'envoi ouvrent chacun la file : la capacité suit les acquittements de l'autre.
+        let d = tempfile::tempdir().unwrap();
+        let mut depot = FileAttente::ouvrir(d.path(), 2).unwrap();
+        depot.deposer(b"1").unwrap();
+        depot.deposer(b"2").unwrap();
+        let mut envoi = FileAttente::ouvrir(d.path(), 2).unwrap();
+        for e in envoi.lot(10).unwrap() {
+            envoi.acquitter(e.id).unwrap();
+        }
+        assert_eq!(depot.deposer(b"3").unwrap(), 3);
     }
 
     #[test]

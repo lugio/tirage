@@ -4,11 +4,18 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde::Deserialize;
+use tirage_modele::PolitiqueNomDocument;
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub collecteur: String,
+    /// Dossier de la file d'attente (sous-dossiers `a-envoyer` et `rebut`).
+    pub donnees: Option<PathBuf>,
+    /// Ce qui est gardé du titre des documents : `non`, `application` (défaut) ou `complet`.
+    #[serde(default)]
+    pub nom_document: PolitiqueNomDocument,
+    pub serveur: Option<Serveur>,
     #[serde(default)]
     pub snmp: Snmp,
     #[serde(default)]
@@ -36,6 +43,32 @@ impl Default for Snmp {
 impl Snmp {
     pub fn delai(&self) -> Duration {
         Duration::from_millis(self.delai_ms.clamp(100, 30_000))
+    }
+}
+
+#[derive(Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Serveur {
+    /// Adresse du serveur, ex. « https://tirage.example.org ».
+    pub url: String,
+    /// Jeton du collecteur (fabriqué par `tirage-serveur --nouveau-jeton`).
+    pub jeton: String,
+    /// Certificat de l'autorité (PEM) si le serveur n'est pas reconnu par le magasin du système.
+    pub ca: Option<PathBuf>,
+    /// Autorise `http://` (essai seulement : les travaux sont des données personnelles).
+    #[serde(default)]
+    pub http_en_clair: bool,
+}
+
+// Le jeton ne doit jamais apparaître dans un journal ou une trace.
+impl std::fmt::Debug for Serveur {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Serveur")
+            .field("url", &self.url)
+            .field("jeton", &"‹masqué›")
+            .field("ca", &self.ca)
+            .field("http_en_clair", &self.http_en_clair)
+            .finish()
     }
 }
 
@@ -109,6 +142,11 @@ mod tests {
         )
         .unwrap();
         assert!(!format!("{c:?}").contains("secret-exemple"));
+        let s =
+            Config::lire("collecteur = \"c\"\n[serveur]\nurl = \"https://x\"\njeton = \"jeton-exemple\"\n")
+                .unwrap();
+        assert!(!format!("{s:?}").contains("jeton-exemple"));
+        assert_eq!(s.nom_document, PolitiqueNomDocument::Application);
     }
 
     #[test]

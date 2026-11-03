@@ -17,6 +17,16 @@ cargo zigbuild --release -p tirage-collecteur --target x86_64-pc-windows-gnu
 
 Sous Windows : `cargo build --release -p tirage-collecteur`.
 
+Lint pour Windows depuis Linux (les dépendances en C se compilent avec zig) : poser `CC_x86_64_pc_windows_gnu` et
+`AR_x86_64_pc_windows_gnu` sur les enveloppes créées par `cargo zigbuild` (`~/.cache/cargo-zigbuild/…/wrappers/`), puis
+`cargo clippy --workspace --all-targets --target x86_64-pc-windows-gnu`.
+
+## Envoi au serveur
+
+Avec `--config` et une section `[serveur]` (url, jeton), le mode console envoie la file au serveur en continu.
+Le jeton se fabrique côté serveur : `tirage-serveur --nouveau-jeton impression-1` affiche le jeton (à mettre dans la
+configuration du collecteur) et la ligne `[[collecteurs]]` (empreinte seule) pour celle du serveur.
+
 ## Lancer
 
 ```powershell
