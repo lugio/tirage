@@ -2,4 +2,5 @@
 
 pub mod config;
 pub mod copieurs;
+pub mod envoi;
 pub mod spouleur;
