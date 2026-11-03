@@ -1,0 +1,10 @@
+# Profil de repli : Printer-MIB standard (RFC 3805), toutes marques.
+# Le compteur standard ne sépare pas noir et couleur : seul le total est relevé.
+nom = "printer-mib"
+description = "Printer-MIB standard (RFC 3805)"
+
+[compteurs]
+# prtMarkerLifeCount, premier marqueur du premier appareil.
+total = ["1.3.6.1.2.1.43.10.2.1.4.1.1"]
+noir = []
+couleur = []

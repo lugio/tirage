@@ -1,0 +1,22 @@
+# Configuration du collecteur — EXEMPLE (valeurs fictives).
+# Le vrai fichier vit sur le serveur d'impression, lisible par le seul compte du service : il contient
+# la communauté SNMP des copieurs.
+
+collecteur = "impression-1"
+
+[snmp]
+delai_ms = 2000
+essais = 2
+# Dossier de profils supplémentaires (*.toml) ; ceux fournis avec l'outil sont intégrés.
+# dossier_profils = 'C:\ProgramData\tirage\profils'
+
+[[copieurs]]
+nom = "COPIEUR-EXEMPLE-1"
+adresse = "192.0.2.10"
+communaute = "public"
+# profil = "konica-minolta"   # sinon choisi d'après l'identifiant de l'appareil (sysObjectID)
+
+[[copieurs]]
+nom = "COPIEUR-EXEMPLE-2"
+adresse = "192.0.2.11:161"
+communaute = "public"

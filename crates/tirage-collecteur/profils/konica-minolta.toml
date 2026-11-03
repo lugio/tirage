@@ -1,0 +1,14 @@
+# Profil Konica Minolta (MIB privée, numéro d'entreprise IANA 18334).
+#
+# Les compteurs noir / couleur de la MIB privée ne sont PAS encore renseignés : ils seront établis d'après un
+# relevé réel d'un appareil (`tirage-collecteur --parcourir 1.3.6.1.4.1.18334 ...`) et la MIB publiée par le
+# constructeur. Tant qu'ils sont vides, le total vient de la Printer-MIB standard.
+nom = "konica-minolta"
+description = "Konica Minolta (bizhub)"
+# Sélection automatique : sysObjectID commence par 1.3.6.1.4.1.18334.
+entreprise = 18334
+
+[compteurs]
+total = []
+noir = []
+couleur = []
