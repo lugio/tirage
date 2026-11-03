@@ -1,8 +1,11 @@
 # Essai du collecteur en mode console
 
-Le mode console lit le spouleur **local** de la machine où il tourne : on peut donc l'essayer sur n'importe quel
-poste Windows 10/11 ou serveur, avec une imprimante virtuelle (« Microsoft Print to PDF »), sans toucher à un serveur
-d'impression.
+Le mode console lit le spouleur **local** de la machine où il tourne : on peut l'essayer sur un poste Windows 10/11
+avec une imprimante virtuelle (« Microsoft Print to PDF »), ou sur le serveur d'impression lui-même.
+
+> Une imprimante **partagée** (`\\serveur\file`) vue d'un poste est une *connexion* : ses travaux vont directement au
+> spouleur du serveur et n'apparaissent pas dans celui du poste. Pour voir les vrais travaux et les vrais pilotes des
+> copieurs, le collecteur tourne **sur le serveur d'impression** (PowerShell administrateur).
 
 ## Construire (depuis Linux)
 
@@ -26,6 +29,35 @@ Ctrl+C pour arrêter ; supprimer le dossier d'essai ensuite.
 
 ## À observer
 
-- Le mode couleur est celui **demandé au pilote** ; vérifier avec un travail N&B puis couleur.
-- Recto-verso et nombre de copies : selon ce que le pilote place dans la DEVMODE.
-- Pages : certains pilotes ne donnent le total qu'en fin de travail.
+- Le mode couleur est celui **demandé au pilote** (propriétés de l'imprimante) ; vérifier avec un travail N&B puis
+  couleur. Un N&B demandé **seulement dans le logiciel** (« niveaux de gris » d'un lecteur PDF ou d'un navigateur)
+  ne change pas le réglage du pilote : le travail reste annoncé en couleur. Les compteurs SNMP de l'appareil donnent
+  le vrai partage N&B / couleur.
+- Recto-verso et nombre de copies : selon ce que le pilote place dans la DEVMODE. Un pilote virtuel (PDF) ne gère
+  pas le recto-verso : « inconnu » est attendu.
+- Pages : certains pilotes ne donnent le total qu'en fin de travail ; le collecteur garde la plus grande valeur vue
+  (pages comme taille, que le spouleur remet à 0 en sortie de file).
+
+## Relevé SNMP d'un copieur (lecture seule)
+
+Les copieurs se déclarent dans un fichier de configuration (modèle : `crates/tirage-collecteur/collecteur.exemple.toml`).
+Ce fichier contient la communauté SNMP : il reste sur la machine du collecteur, lisible par son seul compte, jamais
+dans un dépôt. La communauté n'est jamais passée en ligne de commande ni affichée.
+
+```powershell
+# Un relevé de chaque copieur (identité, compteurs, consommables, état, alertes), en JSON
+.\tirage-collecteur.exe --releve --config C:\essai-tirage\collecteur.toml
+
+# Valeurs d'un sous-arbre d'un appareil, pour écrire le profil d'une marque (ici la MIB privée d'un numéro d'entreprise)
+.\tirage-collecteur.exe --parcourir 1.3.6.1.4.1.<entreprise> --copieur COPIEUR-EXEMPLE-1 --config C:\essai-tirage\collecteur.toml > parcours.txt
+```
+
+Le client SNMP ne sait que lire (GET, GETNEXT) : aucune requête d'écriture n'existe dans le code. La sortie d'un
+parcours contient l'identité de l'appareil (numéro de série…) : la traiter comme une donnée interne.
+
+### Profils de marque
+
+`crates/tirage-collecteur/profils/*.toml` (intégrés à l'exécutable) ; d'autres profils peuvent être déposés dans
+`[snmp] dossier_profils`. Un profil donne les OID à **additionner** pour les compteurs total, noir et couleur ; il
+est choisi d'après l'identifiant de l'appareil (`sysObjectID` sous `1.3.6.1.4.1.<entreprise>`), à défaut la
+Printer-MIB standard (total seul). Un compteur dont un seul OID manque n'est pas publié (jamais de total partiel).
