@@ -1,0 +1,12 @@
+# Configuration du serveur — EXEMPLE (valeurs fictives).
+# Le jeton d'un collecteur n'est JAMAIS écrit ici : seulement son empreinte SHA-256
+# (tirage-serveur --nouveau-jeton en fabrique un et affiche son empreinte).
+
+# Derrière un mandataire inverse HTTPS (le serveur parle HTTP) : écouter sur la boucle locale.
+ecoute = "127.0.0.1:8080"
+base = "/var/lib/tirage/tirage.sqlite"
+
+[[collecteurs]]
+nom = "impression-1"
+# Empreinte du jeton fictif « jeton-exemple-a-remplacer ».
+jeton_sha256 = "fe07e7e309d0f68ee75070ca27bae0c82de85d018d82341e91175d7bc718fdf1"
