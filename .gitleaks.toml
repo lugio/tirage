@@ -1,0 +1,7 @@
+# Les jeux de test sont FICTIFS par règle (CONTRIBUTING.md).
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Jeux de test fictifs"
+paths = ['''crates/[^/]+/tests/fixtures/''']

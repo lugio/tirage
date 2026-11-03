@@ -1,0 +1,11 @@
+[package]
+name = "tirage-modele"
+description = "Types partagés : travail d'impression, relevé de copieur, format d'échange versionné."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license-file.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,29 @@
+# Compilation
+/target/
+
+# Binaires et paquets : jamais dans le dépôt
+*.exe
+*.msi
+*.dll
+*.zip
+
+# Données réelles, bases et exports : jamais dans le dépôt
+*.sqlite
+*.sqlite3
+*.db
+*.csv
+!crates/*/tests/fixtures/*.csv
+*.evtx
+*.spl
+*.shd
+spool/
+.env
+.env.*
+!.env.example
+captures/
+
+# Éditeurs
+.idea/
+.vscode/
+*.swp
+.DS_Store
