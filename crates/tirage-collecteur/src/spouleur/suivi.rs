@@ -98,7 +98,8 @@ impl Suivi {
             Champ::Statut(s) => t.statut |= s,
             Champ::PagesTotales(p) => t.pages_totales = t.pages_totales.max(p),
             Champ::PagesImprimees(p) => t.pages_imprimees = t.pages_imprimees.max(p),
-            Champ::Octets(o) => t.octets = Some(o),
+            // Le spouleur remet la taille à 0 quand le travail quitte la file : on garde la plus grande vue.
+            Champ::Octets(o) => t.octets = Some(t.octets.unwrap_or(0).max(o)),
             Champ::Envoye(ms) => t.envoye_ms = Some(ms),
             Champ::Reglages(r) => t.reglages = r,
         }
@@ -360,6 +361,17 @@ mod tests {
         s.retire(3);
         let t = convertir(&s.prendre_termines()[0], "c", PolitiqueNomDocument::Non).unwrap();
         assert_eq!(t.pages, 5);
+    }
+
+    #[test]
+    fn taille_ne_recule_pas() {
+        let mut s = Suivi::default();
+        alimenter(&mut s, 4, 0);
+        s.appliquer(4, Champ::Octets(120_245), 0);
+        s.appliquer(4, Champ::Octets(0), 0); // vu sur un vrai serveur : 0 en sortie de file
+        s.retire(4);
+        let t = convertir(&s.prendre_termines()[0], "c", PolitiqueNomDocument::Non).unwrap();
+        assert_eq!(t.taille_octets, Some(120_245));
     }
 
     #[test]
