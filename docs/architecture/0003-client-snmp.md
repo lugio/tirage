@@ -23,6 +23,6 @@ délai et essais, parcours borné d'un sous-arbre, faux agent en mémoire pour l
 
 ## Conséquences
 
-- Environ 600 lignes à maintenir, couvertes par des essais (dont un message encodé à l'octet près et un échange UDP réel).
+- Environ 1 000 lignes à maintenir, essais compris (dont un message encodé à l'octet près et un échange UDP réel).
 - SNMP v3 (authentification, chiffrement) demandera un ajout : il se fera derrière le même `Client` si un appareil
   du parc l'exige.
