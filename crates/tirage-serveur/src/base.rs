@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use tirage_modele::{Evenement, ReleveCopieur, Travail};
 
 /// Migrations, dans l'ordre ; la n-ième amène la base à la version n (`PRAGMA user_version`).
@@ -50,7 +50,64 @@ const MIGRATIONS: &[&str] = &[
         recu_ms     INTEGER NOT NULL,
         UNIQUE (collecteur, copieur, releve_ms)
      );",
+    // 2 — fiches de l'annuaire (seulement les personnes qui ont imprimé) et journal des consultations
+    "CREATE TABLE personnes (
+        utilisateur TEXT PRIMARY KEY COLLATE NOCASE,
+        nom         TEXT,
+        service     TEXT,
+        cabinet     TEXT,
+        trouve      INTEGER NOT NULL,
+        verifie_ms  INTEGER NOT NULL
+     );
+     CREATE TABLE consultations (
+        id       INTEGER PRIMARY KEY,
+        quand_ms INTEGER NOT NULL,
+        lecteur  TEXT NOT NULL,
+        action   TEXT NOT NULL,
+        cible    TEXT
+     );
+     CREATE INDEX consultations_quand ON consultations(quand_ms);
+     CREATE TRIGGER consultations_immuables BEFORE UPDATE ON consultations
+     BEGIN
+        SELECT RAISE(ABORT, 'le journal des consultations ne se modifie pas');
+     END;",
 ];
+
+/// Fiche de l'annuaire rattachée à un utilisateur vu dans les travaux.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Personne {
+    pub nom: Option<String>,
+    pub service: Option<String>,
+    pub cabinet: Option<String>,
+    /// Encore présent dans l'annuaire au dernier passage ; sinon, dernières valeurs connues.
+    pub trouve: bool,
+}
+
+/// Une ligne du journal des consultations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Consultation {
+    pub quand_ms: i64,
+    pub lecteur: String,
+    pub action: String,
+    pub cible: Option<String>,
+}
+
+/// Un travail, tel que l'affiche le détail par utilisateur.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LigneTravail {
+    pub envoye_ms: i64,
+    pub file: String,
+    pub poste: Option<String>,
+    pub pages: i64,
+    pub copies: i64,
+    pub feuilles: i64,
+    pub couleur: String,
+    pub recto_verso: String,
+    pub format: Option<String>,
+    pub statut: String,
+    pub nom_document: Option<String>,
+    pub application: Option<String>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Issue {
@@ -172,6 +229,119 @@ impl Base {
             .query_row("SELECT count(*) FROM travaux", [], |r| r.get(0))
     }
 
+    /// Utilisateurs vus dans les travaux, sans fiche ou dont la fiche date d'avant `avant_ms`.
+    pub fn utilisateurs_a_verifier(&self, avant_ms: i64) -> rusqlite::Result<Vec<String>> {
+        let mut s = self.conn.prepare(
+            "SELECT DISTINCT t.utilisateur COLLATE NOCASE
+             FROM travaux t LEFT JOIN personnes p ON t.utilisateur = p.utilisateur COLLATE NOCASE
+             WHERE p.utilisateur IS NULL OR p.verifie_ms < ?1",
+        )?;
+        s.query_map([avant_ms], |r| r.get(0))?.collect()
+    }
+
+    /// Fiche relue dans l'annuaire.
+    pub fn personne_trouvee(
+        &self,
+        utilisateur: &str,
+        nom: Option<&str>,
+        service: Option<&str>,
+        cabinet: Option<&str>,
+        ms: i64,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT INTO personnes (utilisateur, nom, service, cabinet, trouve, verifie_ms)
+             VALUES (?1, ?2, ?3, ?4, 1, ?5)
+             ON CONFLICT (utilisateur) DO UPDATE SET nom = excluded.nom, service = excluded.service,
+                cabinet = excluded.cabinet, trouve = 1, verifie_ms = excluded.verifie_ms",
+            params![utilisateur, nom, service, cabinet, ms],
+        )?;
+        Ok(())
+    }
+
+    /// Absent de l'annuaire (départ, compte supprimé) : les dernières valeurs connues restent, pour l'historique.
+    pub fn personne_absente(&self, utilisateur: &str, ms: i64) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT INTO personnes (utilisateur, trouve, verifie_ms) VALUES (?1, 0, ?2)
+             ON CONFLICT (utilisateur) DO UPDATE SET trouve = 0, verifie_ms = excluded.verifie_ms",
+            params![utilisateur, ms],
+        )?;
+        Ok(())
+    }
+
+    pub fn personne(&self, utilisateur: &str) -> rusqlite::Result<Option<Personne>> {
+        self.conn
+            .query_row(
+                "SELECT nom, service, cabinet, trouve FROM personnes WHERE utilisateur = ?1",
+                [utilisateur],
+                |r| {
+                    Ok(Personne {
+                        nom: r.get(0)?,
+                        service: r.get(1)?,
+                        cabinet: r.get(2)?,
+                        trouve: r.get(3)?,
+                    })
+                },
+            )
+            .optional()
+    }
+
+    /// Ajoute une ligne au journal des consultations.
+    pub fn consigner(
+        &self,
+        quand_ms: i64,
+        lecteur: &str,
+        action: &str,
+        cible: Option<&str>,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT INTO consultations (quand_ms, lecteur, action, cible) VALUES (?1, ?2, ?3, ?4)",
+            params![quand_ms, lecteur, action, cible],
+        )?;
+        Ok(())
+    }
+
+    /// Dernières lignes du journal, la plus récente d'abord.
+    pub fn consultations(&self, max: u32) -> rusqlite::Result<Vec<Consultation>> {
+        let mut s = self.conn.prepare(
+            "SELECT quand_ms, lecteur, action, cible FROM consultations ORDER BY id DESC LIMIT ?1",
+        )?;
+        s.query_map([max], |r| {
+            Ok(Consultation {
+                quand_ms: r.get(0)?,
+                lecteur: r.get(1)?,
+                action: r.get(2)?,
+                cible: r.get(3)?,
+            })
+        })?
+        .collect()
+    }
+
+    /// Derniers travaux d'un utilisateur, le plus récent d'abord.
+    pub fn travaux_de(&self, utilisateur: &str, max: u32) -> rusqlite::Result<Vec<LigneTravail>> {
+        let mut s = self.conn.prepare(
+            "SELECT envoye_ms, file, poste, pages, copies, feuilles, couleur, recto_verso, format, statut,
+                nom_document, application
+             FROM travaux WHERE utilisateur = ?1 COLLATE NOCASE ORDER BY envoye_ms DESC LIMIT ?2",
+        )?;
+        s.query_map(params![utilisateur, max], |r| {
+            Ok(LigneTravail {
+                envoye_ms: r.get(0)?,
+                file: r.get(1)?,
+                poste: r.get(2)?,
+                pages: r.get(3)?,
+                copies: r.get(4)?,
+                feuilles: r.get(5)?,
+                couleur: r.get(6)?,
+                recto_verso: r.get(7)?,
+                format: r.get(8)?,
+                statut: r.get(9)?,
+                nom_document: r.get(10)?,
+                application: r.get(11)?,
+            })
+        })?
+        .collect()
+    }
+
     pub fn connexion(&self) -> &Connection {
         &self.conn
     }
@@ -271,5 +441,83 @@ pub(crate) mod tests {
         });
         assert_eq!(b.enregistrer(&r, 0).unwrap(), Issue::Nouveau);
         assert_eq!(b.enregistrer(&r, 0).unwrap(), Issue::Doublon);
+    }
+
+    #[test]
+    fn migration_depuis_la_version_1_garde_les_travaux() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("t.sqlite");
+        {
+            let c = Connection::open(&p).unwrap();
+            c.execute_batch(MIGRATIONS[0]).unwrap();
+            c.pragma_update(None, "user_version", 1).unwrap();
+            c.execute(
+                "INSERT INTO travaux (cle, collecteur, numero, file, utilisateur, envoye_ms, pages, copies, feuilles,
+                    pages_totales, couleur, recto_verso, statut, recu_ms)
+                 VALUES ('k', 'c', 1, 'f', 'u', 0, 1, 1, 1, 1, 'couleur', 'recto', 'imprime', 0)",
+                [],
+            )
+            .unwrap();
+        }
+        let b = Base::ouvrir(&p).unwrap();
+        assert_eq!(b.version().unwrap(), MIGRATIONS.len());
+        assert_eq!(b.nombre_travaux().unwrap(), 1);
+        assert_eq!(b.utilisateurs_a_verifier(0).unwrap(), vec!["u".to_owned()]);
+    }
+
+    #[test]
+    fn fiche_absente_garde_les_dernieres_valeurs() {
+        let b = Base::en_memoire().unwrap();
+        b.personne_trouvee("a.exemple", Some("A Exemple"), Some("Audit"), None, 10)
+            .unwrap();
+        b.personne_absente("A.EXEMPLE", 20).unwrap();
+        let p = b.personne("a.exemple").unwrap().unwrap();
+        assert_eq!(p.service.as_deref(), Some("Audit"));
+        assert!(!p.trouve);
+        b.personne_absente("b.exemple", 20).unwrap();
+        assert_eq!(b.personne("b.exemple").unwrap().unwrap().nom, None);
+        assert_eq!(b.personne("c.exemple").unwrap(), None);
+    }
+
+    #[test]
+    fn a_verifier_selon_age_et_casse() {
+        let mut b = Base::en_memoire().unwrap();
+        b.enregistrer(&Evenement::Travail(travail(1)), 0).unwrap();
+        let mut t2 = travail(2);
+        t2.utilisateur = "A.Exemple".into();
+        b.enregistrer(&Evenement::Travail(t2), 0).unwrap();
+        assert_eq!(b.utilisateurs_a_verifier(100).unwrap().len(), 1);
+        b.personne_trouvee("a.exemple", None, None, None, 50).unwrap();
+        assert!(b.utilisateurs_a_verifier(50).unwrap().is_empty());
+        assert_eq!(b.utilisateurs_a_verifier(51).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn journal_non_modifiable() {
+        let b = Base::en_memoire().unwrap();
+        b.consigner(1, "lecteur", "detail_utilisateur", Some("a.exemple"))
+            .unwrap();
+        b.consigner(2, "lecteur", "journal", None).unwrap();
+        assert!(
+            b.connexion()
+                .execute("UPDATE consultations SET lecteur = 'x'", [])
+                .is_err()
+        );
+        let j = b.consultations(10).unwrap();
+        assert_eq!((j[0].quand_ms, j[1].lecteur.as_str()), (2, "lecteur"));
+    }
+
+    #[test]
+    fn travaux_du_seul_utilisateur_demande() {
+        let mut b = Base::en_memoire().unwrap();
+        b.enregistrer(&Evenement::Travail(travail(1)), 0).unwrap();
+        b.enregistrer(&Evenement::Travail(travail(2)), 0).unwrap();
+        let mut autre = travail(3);
+        autre.utilisateur = "b.exemple".into();
+        b.enregistrer(&Evenement::Travail(autre), 0).unwrap();
+        let l = b.travaux_de("A.EXEMPLE", 10).unwrap();
+        assert_eq!(l.len(), 2);
+        assert!(l[0].envoye_ms > l[1].envoye_ms);
+        assert_eq!(b.travaux_de("a.exemple", 1).unwrap().len(), 1);
     }
 }

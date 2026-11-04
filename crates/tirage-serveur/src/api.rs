@@ -20,6 +20,7 @@ use tirage_modele::{Enveloppe, Evenement};
 
 use crate::base::Base;
 use crate::config::Config;
+use crate::interface::{self, Contexte, Interface};
 
 /// Taille maximale d'un lot (événements) et d'un corps de requête.
 pub const LOT_MAX: usize = 500;
@@ -30,6 +31,8 @@ pub struct Etat {
     pub config: Arc<Config>,
     pub base: Arc<Mutex<Base>>,
     pub horloge: fn() -> i64,
+    /// Interface web ; absente sans annuaire configuré : aucune page n'est alors servie.
+    pub interface: Option<Arc<Interface>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -57,11 +60,20 @@ pub struct Refus {
 }
 
 pub fn routeur(etat: Etat) -> Router {
-    Router::new()
+    let pages = etat.interface.clone().map(|interface| Contexte {
+        interface,
+        base: Arc::clone(&etat.base),
+        horloge: etat.horloge,
+    });
+    let api = Router::new()
         .route("/sante", get(|| async { "ok" }))
         .route("/api/v1/evenements", post(recevoir))
-        .layer(DefaultBodyLimit::max(CORPS_MAX))
-        .with_state(etat)
+        .layer(DefaultBodyLimit::max(CORPS_MAX));
+    let tout = match pages {
+        Some(c) => api.merge(interface::routes(c)),
+        None => api,
+    };
+    tout.with_state(etat)
 }
 
 fn erreur(code: StatusCode, message: &str) -> Response {
@@ -163,6 +175,7 @@ mod tests {
             config: Arc::new(config),
             base: Arc::new(Mutex::new(Base::en_memoire().unwrap())),
             horloge: || 42,
+            interface: None,
         }
     }
 

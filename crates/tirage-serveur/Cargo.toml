@@ -11,17 +11,20 @@ publish.workspace = true
 tirage-modele = { path = "../tirage-modele" }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["raw_value"] }
-axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+axum = { version = "0.8", default-features = false, features = ["form", "http1", "json", "tokio"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 toml = { version = "0.9", default-features = false, features = ["parse", "serde", "std"] }
 sha2 = "0.10"
 getrandom = "0.3"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+ldap3 = { version = "0.12", default-features = false, features = ["sync", "tls-rustls-ring"] }
 
 [dev-dependencies]
 tirage-collecteur = { path = "../tirage-collecteur" }
 tirage-file = { path = "../tirage-file" }
 tempfile = "3"
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring", "pem"] }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 
