@@ -461,7 +461,7 @@ fn entier(n: i64) -> String {
     let brut = n.unsigned_abs().to_string();
     let mut r = String::new();
     for (i, c) in brut.chars().enumerate() {
-        if i > 0 && (brut.len() - i) % 3 == 0 {
+        if i > 0 && (brut.len() - i).is_multiple_of(3) {
             r.push('\u{202f}');
         }
         r.push(c);
