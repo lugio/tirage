@@ -21,6 +21,8 @@
 - Sauvegarde cohérente de la base (`--config F --sauvegarder COPIE`), serveur en marche, fichier neuf en droits 600, sans écrasement.
 - Modèle de note d'information des personnes (`docs/guides/information-des-personnes.md`).
 - Pose du serveur : unité systemd durcie et exemple nginx (`deploiement/`), guide avec certificat, dimensionnement et données personnelles (`docs/guides/serveur.md`).
+- Tableau de bord : évolution des pages par jour ou par mois (colonnes empilées, chiffres dépliables), répartition noir et blanc / couleur, classements. Graphiques en SVG générés côté serveur, sans script.
+- Interface fluide et responsive, thème sombre selon le système. Style dans `style.css`, composants partagés dans `interface/gabarit.rs` et `interface/graphique.rs`.
 
 ### Corrigé
 - Connexion : l'appartenance au groupe se lit depuis le groupe (`member`, groupes imbriqués compris). Un compte de lecture sans droit sur `memberOf` faisait refuser tout le monde, sans erreur.

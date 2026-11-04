@@ -299,6 +299,30 @@ impl Base {
         .collect()
     }
 
+    /// Pages imprimées de `[du_ms, au_ms[` par quart d'heure et mode couleur : l'appelant les range dans son fuseau, ce
+    /// que SQLite ne sait pas faire aux changements d'heure.
+    pub fn pages_dans_le_temps(&self, du_ms: i64, au_ms: i64) -> rusqlite::Result<Vec<(i64, String, i64)>> {
+        let mut s = self.conn.prepare(
+            "SELECT envoye_ms / ?3 * ?3, couleur, sum(pages_totales) FROM travaux
+             WHERE envoye_ms >= ?1 AND envoye_ms < ?2 AND statut = 'imprime' GROUP BY 1, 2",
+        )?;
+        s.query_map([du_ms, au_ms, 900_000], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect()
+    }
+
+    /// Pages archivées des mois `[premier, dernier]` (« AAAA-MM »), par mois et mode couleur.
+    pub fn pages_archivees(
+        &self,
+        premier: &str,
+        dernier: &str,
+    ) -> rusqlite::Result<Vec<(String, String, i64)>> {
+        let mut s = self.conn.prepare(
+            "SELECT mois, couleur, sum(pages) FROM totaux_mensuels WHERE mois >= ?1 AND mois <= ?2 GROUP BY 1, 2",
+        )?;
+        s.query_map([premier, dernier], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect()
+    }
+
     /// Totaux archivés des mois `[premier, dernier]` (« AAAA-MM »), selon l'axe. Aucun par utilisateur : ils sont sans nom.
     pub fn totaux_archives(
         &self,
