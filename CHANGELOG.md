@@ -23,4 +23,5 @@
 - Pose du serveur : unité systemd durcie et exemple nginx (`deploiement/`), guide avec certificat, dimensionnement et données personnelles (`docs/guides/serveur.md`).
 
 ### Corrigé
+- Connexion : l'appartenance au groupe se lit depuis le groupe (`member`, groupes imbriqués compris). Un compte de lecture sans droit sur `memberOf` faisait refuser tout le monde, sans erreur.
 - La taille d'un travail ne retombe plus à 0 quand le spouleur le retire de la file.

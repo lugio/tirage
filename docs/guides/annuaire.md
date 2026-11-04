@@ -3,7 +3,7 @@
 Sans section `[annuaire]`, le serveur ne fait que recevoir les événements : aucune page n'est servie.
 
 ## Préparer
-1. Un **compte de lecture** dédié, sans autre droit.
+1. Un **compte de lecture** dédié, sans autre droit. Il doit pouvoir lire `member` sur le groupe autorisé ; `memberOf` ne lui est pas nécessaire.
 2. Son mot de passe dans un fichier : `install -m 600 -o tirage /dev/stdin /etc/tirage/annuaire.secret`, puis saisir le
    mot de passe suivi de Ctrl-D. Il n'apparaît jamais dans la configuration.
 3. Un **groupe** contenant les personnes autorisées à consulter. Les groupes imbriqués comptent.
