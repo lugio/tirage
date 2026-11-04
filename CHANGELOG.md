@@ -20,6 +20,7 @@
 - Conservation (`[conservation]`, 12 mois par défaut) : le détail passe en totaux mensuels sans nom, effacement réel dans le fichier, fiches sans objet retirées, journal des consultations purgé ; les rapports continuent de compter ces totaux pour les mois entiers.
 - Sauvegarde cohérente de la base (`--config F --sauvegarder COPIE`), serveur en marche, fichier neuf en droits 600, sans écrasement.
 - Modèle de note d'information des personnes (`docs/guides/information-des-personnes.md`).
+- Pose du serveur : unité systemd durcie et exemple nginx (`deploiement/`), guide avec certificat, dimensionnement et données personnelles (`docs/guides/serveur.md`).
 
 ### Corrigé
 - La taille d'un travail ne retombe plus à 0 quand le spouleur le retire de la file.

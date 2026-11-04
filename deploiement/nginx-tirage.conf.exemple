@@ -1,0 +1,43 @@
+# Mandataire HTTPS de tirage, sur la MÊME machine que le serveur : le mot de passe de connexion passe par ce lien.
+# Valeurs fictives : 192.0.2.10 = serveur d'impression, 192.0.2.128/25 = postes des lecteurs.
+server {
+    listen 443 ssl;
+    server_name _;
+    server_tokens off;
+
+    ssl_certificate     /etc/tirage/tls/cert.pem;
+    ssl_certificate_key /etc/tirage/tls/cle.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_tickets off;
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    # Aucune adresse consultée au journal : /utilisateurs/… nomme une personne. Le niveau « error » cite la requête.
+    access_log off;
+    error_log /var/log/nginx/tirage-erreurs.log crit;
+
+    # Rien d'un travail ni d'une page sur le disque du mandataire.
+    client_max_body_size 4m;
+    client_body_buffer_size 4m;
+    proxy_max_temp_file_size 0;
+
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header Connection "";
+    proxy_read_timeout 120s;
+
+    location /api/ {
+        allow 192.0.2.10;
+        deny all;
+        proxy_pass http://127.0.0.1:8080;
+    }
+    location = /sante {
+        allow 127.0.0.1;
+        deny all;
+        proxy_pass http://127.0.0.1:8080;
+    }
+    location / {
+        allow 192.0.2.128/25;
+        deny all;
+        proxy_pass http://127.0.0.1:8080;
+    }
+}
