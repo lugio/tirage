@@ -197,6 +197,7 @@ g:hover > .cible { fill: var(--entete-tableau); }
 .barre { min-width: 4rem; }
 .piste { fill: var(--entete-tableau); }
 td:has(> .barre) { width: 45%; }
+.carte td.n:first-child { width: 1%; }
 .legende { display: flex; flex-wrap: wrap; gap: .25rem 1rem; margin: .25rem 0 .5rem; padding: 0; list-style: none; font-size: .85rem; color: var(--texte-doux); }
 .pastille { display: inline-block; width: .7rem; height: .7rem; margin-right: .35rem; border-radius: 3px; }
 details { margin-top: .5rem; font-size: .9rem; }

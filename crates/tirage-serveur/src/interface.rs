@@ -45,6 +45,7 @@ const LIGNES_JOURNAL: u32 = 500;
 /// Lecteur consigné pour un essai refusé dont l'identifiant n'est pas connu : ce qui a été saisi n'est pas gardé
 /// (on saisit parfois son mot de passe dans le mauvais champ).
 const LECTEUR_INCONNU: &str = "(inconnu)";
+const PERIODE_JOURS_MAX: i32 = 3660;
 const SERIE_NOIR: Serie = Serie {
     nom: "N&B",
     classe: "noir",
@@ -372,6 +373,10 @@ impl Periode {
         let au = lire(&d.au, aujourd_hui)?;
         if au < du {
             return Err("La fin de la période précède son début.".into());
+        }
+        // Le calcul de l'évolution parcourt la période, base verrouillée : une date extrême ne doit pas la bloquer.
+        if du.until(au).map_or(true, |s| s.get_days() > PERIODE_JOURS_MAX) {
+            return Err("La période ne peut pas dépasser dix ans.".into());
         }
         let debut = |j: Date| {
             j.to_zoned(fuseau.clone())
@@ -1519,6 +1524,18 @@ mod tests {
             vide.texte
         );
         assert!(!vide.texte.contains("class=\"graphique\""));
+    }
+
+    #[tokio::test]
+    async fn periode_demesuree_refusee_sans_trace_de_lecture() {
+        let b = banc();
+        let cookie = b.connecter().await;
+        let r = b.get("/?du=0001-01-01&au=9999-12-30", Some(&cookie)).await;
+        assert_eq!(r.code, StatusCode::BAD_REQUEST);
+        assert!(r.texte.contains("dix ans"), "{}", r.texte);
+        assert!(!b.journal().iter().any(|(_, a, _)| a == "tableau"));
+        let r = b.get("/?du=2020-01-01&au=2026-11-15", Some(&cookie)).await;
+        assert_eq!(r.code, StatusCode::OK);
     }
 
     #[tokio::test]
