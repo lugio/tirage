@@ -14,6 +14,9 @@
 - Annuaire en lecture seule (`[annuaire]`, LDAPS) : service et cabinet des seules personnes qui ont imprimé, par recherche nominative, relus régulièrement ; dernières valeurs gardées pour un compte disparu. ADR 0004, guide `docs/guides/annuaire.md`.
 - Connexion à l'interface réservée à un groupe (groupes imbriqués compris) : mot de passe vide refusé avant tout échange, refus indiscernables, limite d'essais par identifiant, session en mémoire (cookie `HttpOnly`, `Secure`, `SameSite=Strict`, seule l'empreinte du jeton est gardée).
 - Journal des consultations : connexions, détail par utilisateur et lecture du journal, écrits avant de servir les données (journal indisponible = page non servie) ; lignes non modifiables.
+- Interface : tableau de bord sur une période, rapports par utilisateur, service, cabinet, copieur et format (N&B, couleur, recto-verso, feuilles, coût), palmarès, état des copieurs, détail par utilisateur, dates dans le fuseau configuré. Chaque lecture est au journal.
+- Coûts (`[couts]`) : prix par page N&B et couleur, général ou par file ; une file sans tarif est signalée, un mode couleur inconnu est chiffré au tarif noir.
+- Export CSV pour tableur (UTF-8 avec BOM, point-virgule, valeurs prises pour une formule neutralisées), sans nom de document.
 
 ### Corrigé
 - La taille d'un travail ne retombe plus à 0 quand le spouleur le retire de la file.

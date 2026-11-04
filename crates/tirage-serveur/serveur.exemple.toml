@@ -37,3 +37,17 @@ attribut_cabinet = "company"
 # session_minutes = 240
 # inactivite_minutes = 30
 # http_en_clair = false     # true retire « Secure » du cookie : essai sans HTTPS seulement
+# fuseau = "UTC"            # dates affichées et bornes de période (nom IANA, ex. « Europe/Paris »)
+
+# Prix par page (valeurs fictives). Une file sans tarif propre prend le tarif général ;
+# sans tarif du tout, ses pages sont signalées et ne comptent pas dans le coût.
+# Une page au mode couleur inconnu est chiffrée au tarif noir.
+[couts]
+devise = "€"
+noir = 0.01
+couleur = 0.08
+
+[[couts.files]]
+file = "COPIEUR-EXEMPLE-1"
+noir = 0.008
+couleur = 0.06

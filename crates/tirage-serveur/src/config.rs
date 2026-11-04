@@ -20,6 +20,61 @@ pub struct Config {
     pub annuaire: Option<ConfigAnnuaire>,
     #[serde(default)]
     pub interface: ConfigInterface,
+    #[serde(default)]
+    pub couts: ConfigCouts,
+}
+
+/// Prix par page. Une file sans tarif propre prend le tarif général ; sans tarif du tout, ses pages sont signalées.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct ConfigCouts {
+    pub devise: String,
+    pub noir: Option<f64>,
+    pub couleur: Option<f64>,
+    pub files: Vec<TarifFile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TarifFile {
+    pub file: String,
+    pub noir: f64,
+    pub couleur: f64,
+}
+
+impl Default for ConfigCouts {
+    fn default() -> Self {
+        ConfigCouts {
+            devise: "€".into(),
+            noir: None,
+            couleur: None,
+            files: Vec::new(),
+        }
+    }
+}
+
+impl ConfigCouts {
+    /// Prix d'une page, en cent-millièmes d'unité monétaire. Le mode inconnu suit le tarif noir.
+    pub fn prix(&self, file: &str, couleur: bool) -> Option<i64> {
+        let propre = self.files.iter().find(|t| t.file.eq_ignore_ascii_case(file));
+        let p = match (propre, couleur) {
+            (Some(t), true) => Some(t.couleur),
+            (Some(t), false) => Some(t.noir),
+            (None, true) => self.couleur,
+            (None, false) => self.noir,
+        };
+        p.map(|x| (x * 100_000.0).round() as i64)
+    }
+
+    fn valider(&self) -> Result<(), String> {
+        let correct = |x: f64| x.is_finite() && (0.0..=1000.0).contains(&x);
+        let generaux = [self.noir, self.couleur].into_iter().flatten();
+        let par_file = self.files.iter().flat_map(|t| [t.noir, t.couleur]);
+        if !generaux.chain(par_file).all(correct) {
+            return Err("couts : un prix doit être un nombre entre 0 et 1000".into());
+        }
+        Ok(())
+    }
 }
 
 /// Lecture seule de l'annuaire : rattachement des personnes et connexion réservée à un groupe.
@@ -83,6 +138,8 @@ pub struct ConfigInterface {
     pub inactivite_minutes: u32,
     /// Retire l'attribut `Secure` du cookie : essai sans HTTPS seulement.
     pub http_en_clair: bool,
+    /// Fuseau des dates affichées et des bornes de période (nom IANA, ex. « Europe/Paris »).
+    pub fuseau: String,
 }
 
 impl Default for ConfigInterface {
@@ -91,6 +148,7 @@ impl Default for ConfigInterface {
             session_minutes: 240,
             inactivite_minutes: 30,
             http_en_clair: false,
+            fuseau: "UTC".into(),
         }
     }
 }
@@ -192,6 +250,10 @@ impl Config {
         if c.interface.session_minutes == 0 || c.interface.inactivite_minutes == 0 {
             return Err("interface : les durées de session doivent être positives".into());
         }
+        if jiff::tz::TimeZone::get(&c.interface.fuseau).is_err() {
+            return Err(format!("interface : fuseau inconnu : {}", c.interface.fuseau));
+        }
+        c.couts.valider()?;
         Ok(c)
     }
 
@@ -271,5 +333,19 @@ mod tests {
         assert!(avec("ldaps://d", "attribut_nom = \"dn:ou\"\n").is_err());
         assert!(avec("ldaps://d", "attribut_service = \"dn:ou\"\n").is_ok());
         assert!(avec("ldaps://d", "filtre_personnes = \"x=y\"\n").is_err());
+    }
+
+    #[test]
+    fn couts_et_fuseau() {
+        let base = "ecoute = \"x\"\nbase = \"b\"\n";
+        assert!(Config::lire(&format!("{base}[couts]\nnoir = -1.0\n")).is_err());
+        assert!(Config::lire(&format!("{base}[interface]\nfuseau = \"Lune/Base\"\n")).is_err());
+        let c = Config::lire(&format!(
+            "{base}[interface]\nfuseau = \"Europe/Paris\"\n[couts]\nnoir = 0.01\n[[couts.files]]\nfile = \"F\"\nnoir = 0.02\ncouleur = 0.2\n"
+        ))
+        .unwrap();
+        assert_eq!(c.couts.prix("f", true), Some(20_000));
+        assert_eq!(c.couts.prix("autre", false), Some(1000));
+        assert_eq!(c.couts.prix("autre", true), None);
     }
 }
