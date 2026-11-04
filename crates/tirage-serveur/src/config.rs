@@ -22,6 +22,27 @@ pub struct Config {
     pub interface: ConfigInterface,
     #[serde(default)]
     pub couts: ConfigCouts,
+    #[serde(default)]
+    pub conservation: ConfigConservation,
+}
+
+/// Durées de conservation, en mois glissants.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct ConfigConservation {
+    /// Détail par utilisateur ; au-delà, totaux mensuels sans nom.
+    pub detail_mois: u32,
+    /// Journal des consultations.
+    pub journal_mois: u32,
+}
+
+impl Default for ConfigConservation {
+    fn default() -> Self {
+        ConfigConservation {
+            detail_mois: 12,
+            journal_mois: 12,
+        }
+    }
 }
 
 /// Prix par page. Une file sans tarif propre prend le tarif général ; sans tarif du tout, ses pages sont signalées.
@@ -254,6 +275,10 @@ impl Config {
             return Err(format!("interface : fuseau inconnu : {}", c.interface.fuseau));
         }
         c.couts.valider()?;
+        let durees = [c.conservation.detail_mois, c.conservation.journal_mois];
+        if durees.iter().any(|m| !(1..=120).contains(m)) {
+            return Err("conservation : une durée doit être comprise entre 1 et 120 mois".into());
+        }
         Ok(c)
     }
 
@@ -339,6 +364,7 @@ mod tests {
     fn couts_et_fuseau() {
         let base = "ecoute = \"x\"\nbase = \"b\"\n";
         assert!(Config::lire(&format!("{base}[couts]\nnoir = -1.0\n")).is_err());
+        assert!(Config::lire(&format!("{base}[conservation]\ndetail_mois = 0\n")).is_err());
         assert!(Config::lire(&format!("{base}[interface]\nfuseau = \"Lune/Base\"\n")).is_err());
         let c = Config::lire(&format!(
             "{base}[interface]\nfuseau = \"Europe/Paris\"\n[couts]\nnoir = 0.01\n[[couts.files]]\nfile = \"F\"\nnoir = 0.02\ncouleur = 0.2\n"

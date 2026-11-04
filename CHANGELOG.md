@@ -17,6 +17,9 @@
 - Interface : tableau de bord sur une période, rapports par utilisateur, service, cabinet, copieur et format (N&B, couleur, recto-verso, feuilles, coût), palmarès, état des copieurs, détail par utilisateur, dates dans le fuseau configuré. Chaque lecture est au journal.
 - Coûts (`[couts]`) : prix par page N&B et couleur, général ou par file ; une file sans tarif est signalée, un mode couleur inconnu est chiffré au tarif noir.
 - Export CSV pour tableur (UTF-8 avec BOM, point-virgule, valeurs prises pour une formule neutralisées), sans nom de document.
+- Conservation (`[conservation]`, 12 mois par défaut) : le détail passe en totaux mensuels sans nom, effacement réel dans le fichier, fiches sans objet retirées, journal des consultations purgé ; les rapports continuent de compter ces totaux pour les mois entiers.
+- Sauvegarde cohérente de la base (`--config F --sauvegarder COPIE`), serveur en marche, fichier neuf en droits 600, sans écrasement.
+- Modèle de note d'information des personnes (`docs/guides/information-des-personnes.md`).
 
 ### Corrigé
 - La taille d'un travail ne retombe plus à 0 quand le spouleur le retire de la file.

@@ -2,6 +2,7 @@
 //!
 //! `--config FICHIER` : reçoit les événements des collecteurs et, si un annuaire est configuré, sert l'interface
 //! (HTTP ; à placer derrière un mandataire HTTPS).
+//! `--config FICHIER --sauvegarder COPIE` : copie cohérente de la base dans un fichier neuf, serveur en marche ou non.
 //! `--nouveau-jeton NOM` : fabrique le jeton d'un collecteur et la ligne à ajouter à la configuration.
 
 use std::path::PathBuf;
@@ -11,6 +12,7 @@ use tirage_serveur::annuaire::{self, Annuaire, Ldap};
 use tirage_serveur::api::{self, Etat};
 use tirage_serveur::base::Base;
 use tirage_serveur::config::{self, Config};
+use tirage_serveur::conservation;
 use tirage_serveur::interface::Interface;
 
 fn texte_version() -> String {
@@ -24,6 +26,7 @@ fn texte_version() -> String {
 const USAGE: &str = "usage :
   tirage-serveur --version
   tirage-serveur --config FICHIER
+  tirage-serveur --config FICHIER --sauvegarder COPIE
   tirage-serveur --nouveau-jeton NOM_DU_COLLECTEUR";
 
 fn maintenant_ms() -> i64 {
@@ -42,6 +45,9 @@ fn main() {
         }
         (Some("--nouveau-jeton"), Some(nom)) if args.len() == 2 => nouveau_jeton(nom),
         (Some("--config"), Some(f)) if args.len() == 2 => servir(PathBuf::from(f)),
+        (Some("--config"), Some(f)) if args.len() == 4 && args[2] == "--sauvegarder" => {
+            sauvegarder(&PathBuf::from(f), &PathBuf::from(&args[3]))
+        }
         _ => {
             eprintln!("{}\n{USAGE}", texte_version());
             std::process::exit(2);
@@ -66,6 +72,16 @@ fn nouveau_jeton(nom: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn sauvegarder(config: &std::path::Path, copie: &std::path::Path) -> Result<(), String> {
+    let cfg = Config::charger(config)?;
+    conservation::sauvegarder(&cfg.base, copie)?;
+    eprintln!(
+        "copie écrite : {} (contient des données personnelles)",
+        copie.display()
+    );
+    Ok(())
+}
+
 fn servir(chemin: PathBuf) -> Result<(), String> {
     let cfg = Config::charger(&chemin)?;
     if cfg.collecteurs.is_empty() {
@@ -81,12 +97,15 @@ fn servir(chemin: PathBuf) -> Result<(), String> {
             None
         }
     };
+    let regles = cfg.conservation.clone();
+    let fuseau = jiff::tz::TimeZone::get(&cfg.interface.fuseau).map_err(|e| e.to_string())?;
     let etat = Etat {
         interface: annuaire.as_ref().map(|(a, _)| {
             Arc::new(Interface::nouvelle(
                 Arc::clone(a),
                 &cfg.interface,
                 cfg.couts.clone(),
+                cfg.conservation.detail_mois,
             ))
         }),
         config: Arc::new(cfg),
@@ -99,6 +118,7 @@ fn servir(chemin: PathBuf) -> Result<(), String> {
             .await
             .map_err(|e| format!("écoute {ecoute} : {e}"))?;
         eprintln!("{} — écoute sur {ecoute}", texte_version());
+        tokio::spawn(appliquer_la_conservation(Arc::clone(&base), regles, fuseau));
         if let Some((a, minutes)) = annuaire {
             tokio::spawn(rafraichir_les_fiches(a, base, minutes));
         }
@@ -109,6 +129,29 @@ fn servir(chemin: PathBuf) -> Result<(), String> {
             .await
             .map_err(|e| e.to_string())
     })
+}
+
+/// Au démarrage puis chaque jour. Le journal ne donne que des nombres.
+async fn appliquer_la_conservation(
+    base: Arc<Mutex<Base>>,
+    regles: config::ConfigConservation,
+    fuseau: jiff::tz::TimeZone,
+) {
+    loop {
+        let (b, r, f) = (Arc::clone(&base), regles.clone(), fuseau.clone());
+        let res =
+            tokio::task::spawn_blocking(move || conservation::appliquer(&b, &r, &f, maintenant_ms())).await;
+        match res {
+            Ok(Ok(bilan)) if bilan.travaux + bilan.personnes + bilan.consultations > 0 => eprintln!(
+                "conservation : {} travaux passés en totaux, {} fiches et {} lignes de journal effacées",
+                bilan.travaux, bilan.personnes, bilan.consultations
+            ),
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => eprintln!("conservation : échec : {e}"),
+            Err(e) => eprintln!("conservation : interrompue : {e}"),
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(86_400)).await;
+    }
 }
 
 /// Relit régulièrement les fiches de l'annuaire. Le journal ne cite aucune personne.

@@ -73,7 +73,29 @@ const MIGRATIONS: &[&str] = &[
      BEGIN
         SELECT RAISE(ABORT, 'le journal des consultations ne se modifie pas');
      END;",
+    // 3 — totaux mensuels sans nom, seuls survivants du détail après la durée de conservation
+    "CREATE TABLE totaux_mensuels (
+        mois        TEXT NOT NULL,
+        service     TEXT NOT NULL,
+        cabinet     TEXT NOT NULL,
+        file        TEXT NOT NULL,
+        couleur     TEXT NOT NULL,
+        recto_verso TEXT NOT NULL,
+        format      TEXT NOT NULL,
+        travaux     INTEGER NOT NULL,
+        pages       INTEGER NOT NULL,
+        feuilles    INTEGER NOT NULL,
+        PRIMARY KEY (mois, service, cabinet, file, couleur, recto_verso, format)
+     );",
 ];
+
+/// Ce qu'une purge a effacé.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct BilanPurge {
+    pub travaux: usize,
+    pub personnes: usize,
+    pub consultations: usize,
+}
 
 /// Fiche de l'annuaire rattachée à un utilisateur vu dans les travaux.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -156,6 +178,8 @@ impl Base {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "NORMAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
+        // Ce qui est effacé est écrasé dans le fichier, pas seulement marqué libre.
+        conn.pragma_update(None, "secure_delete", "ON")?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         let mut b = Base { conn };
         b.migrer()?;
@@ -273,6 +297,107 @@ impl Base {
             })
         })?
         .collect()
+    }
+
+    /// Totaux archivés des mois `[premier, dernier]` (« AAAA-MM »), selon l'axe. Aucun par utilisateur : ils sont sans nom.
+    pub fn totaux_archives(
+        &self,
+        axe: Axe,
+        premier: &str,
+        dernier: &str,
+    ) -> rusqlite::Result<Vec<LigneBrute>> {
+        let cle = match axe {
+            Axe::Utilisateur => return Ok(Vec::new()),
+            Axe::Service => "service",
+            Axe::Cabinet => "cabinet",
+            Axe::Copieur => "file",
+            Axe::Format => "format",
+        };
+        let sql = format!(
+            "SELECT {cle}, file, couleur, recto_verso, sum(travaux), sum(pages), sum(feuilles)
+             FROM totaux_mensuels WHERE mois >= ?1 AND mois <= ?2 GROUP BY 1, 2, 3, 4"
+        );
+        let mut s = self.conn.prepare(&sql)?;
+        s.query_map([premier, dernier], |r| {
+            Ok(LigneBrute {
+                cle: r.get(0)?,
+                nom: None,
+                file: r.get(1)?,
+                couleur: r.get(2)?,
+                recto_verso: r.get(3)?,
+                travaux: r.get(4)?,
+                pages: r.get(5)?,
+                feuilles: r.get(6)?,
+            })
+        })?
+        .collect()
+    }
+
+    /// Passe en totaux sans nom les travaux d'avant `limite_ms`, efface leur détail et les fiches devenues sans objet,
+    /// purge le journal d'avant `limite_journal_ms`. Tout ou rien : une coupure ne perd ni ne double aucun total.
+    pub fn purger(
+        &mut self,
+        limite_ms: i64,
+        limite_journal_ms: i64,
+        mois_de: impl Fn(i64) -> String,
+    ) -> rusqlite::Result<BilanPurge> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut lire = tx.prepare(
+                "SELECT t.envoye_ms, COALESCE(NULLIF(p.service, ''), 'Non rattaché'),
+                    COALESCE(NULLIF(p.cabinet, ''), 'Non rattaché'), t.file, t.couleur, t.recto_verso,
+                    COALESCE(NULLIF(t.format, ''), 'Inconnu'), t.pages_totales, t.feuilles
+                 FROM travaux t LEFT JOIN personnes p ON t.utilisateur = p.utilisateur COLLATE NOCASE
+                 WHERE t.envoye_ms < ?1 AND t.statut = 'imprime'",
+            )?;
+            let mut ajouter = tx.prepare(
+                "INSERT INTO totaux_mensuels (mois, service, cabinet, file, couleur, recto_verso, format, travaux,
+                    pages, feuilles)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?9)
+                 ON CONFLICT (mois, service, cabinet, file, couleur, recto_verso, format) DO UPDATE SET
+                    travaux = travaux + 1, pages = pages + excluded.pages, feuilles = feuilles + excluded.feuilles",
+            )?;
+            let mut lignes = lire.query([limite_ms])?;
+            while let Some(r) = lignes.next()? {
+                ajouter.execute(params![
+                    mois_de(r.get(0)?),
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                    r.get::<_, String>(5)?,
+                    r.get::<_, String>(6)?,
+                    r.get::<_, i64>(7)?,
+                    r.get::<_, i64>(8)?,
+                ])?;
+            }
+        }
+        let travaux = tx.execute("DELETE FROM travaux WHERE envoye_ms < ?1", [limite_ms])?;
+        let personnes = tx.execute(
+            "DELETE FROM personnes WHERE NOT EXISTS (
+                SELECT 1 FROM travaux t WHERE t.utilisateur = personnes.utilisateur COLLATE NOCASE)",
+            [],
+        )?;
+        let consultations = tx.execute(
+            "DELETE FROM consultations WHERE quand_ms < ?1",
+            [limite_journal_ms],
+        )?;
+        tx.commit()?;
+        // Vide le journal d'écriture, qui garde sinon une copie des pages effacées.
+        self.conn
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        Ok(BilanPurge {
+            travaux,
+            personnes,
+            consultations,
+        })
+    }
+
+    /// Copie cohérente vers un fichier neuf ou vide.
+    pub fn copier_vers(&self, destination: &Path) -> rusqlite::Result<()> {
+        self.conn
+            .execute("VACUUM INTO ?1", [destination.to_string_lossy().as_ref()])?;
+        Ok(())
     }
 
     /// Travaux de la période non comptés (annulés, en erreur, statut inconnu).

@@ -51,3 +51,8 @@ couleur = 0.08
 file = "COPIEUR-EXEMPLE-1"
 noir = 0.008
 couleur = 0.06
+
+# Valeurs par défaut. Au-delà de detail_mois, un travail n'existe plus qu'en totaux mensuels sans nom.
+# [conservation]
+# detail_mois = 12
+# journal_mois = 12
