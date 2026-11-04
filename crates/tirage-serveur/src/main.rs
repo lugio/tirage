@@ -82,9 +82,13 @@ fn servir(chemin: PathBuf) -> Result<(), String> {
         }
     };
     let etat = Etat {
-        interface: annuaire
-            .as_ref()
-            .map(|(a, _)| Arc::new(Interface::nouvelle(Arc::clone(a), &cfg.interface))),
+        interface: annuaire.as_ref().map(|(a, _)| {
+            Arc::new(Interface::nouvelle(
+                Arc::clone(a),
+                &cfg.interface,
+                cfg.couts.clone(),
+            ))
+        }),
         config: Arc::new(cfg),
         base: Arc::clone(&base),
         horloge: maintenant_ms,

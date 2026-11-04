@@ -8,6 +8,8 @@ use std::path::Path;
 use rusqlite::{Connection, OptionalExtension, params};
 use tirage_modele::{Evenement, ReleveCopieur, Travail};
 
+use crate::rapports::Axe;
+
 /// Migrations, dans l'ordre ; la n-ième amène la base à la version n (`PRAGMA user_version`).
 const MIGRATIONS: &[&str] = &[
     // 1 — travaux et relevés
@@ -90,6 +92,19 @@ pub struct Consultation {
     pub lecteur: String,
     pub action: String,
     pub cible: Option<String>,
+}
+
+/// Agrégat brut d'un rapport : une ligne par (clé, file, mode couleur, recto-verso).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LigneBrute {
+    pub cle: String,
+    pub nom: Option<String>,
+    pub file: String,
+    pub couleur: String,
+    pub recto_verso: String,
+    pub travaux: i64,
+    pub pages: i64,
+    pub feuilles: i64,
 }
 
 /// Un travail, tel que l'affiche le détail par utilisateur.
@@ -227,6 +242,58 @@ impl Base {
     pub fn nombre_travaux(&self) -> rusqlite::Result<i64> {
         self.conn
             .query_row("SELECT count(*) FROM travaux", [], |r| r.get(0))
+    }
+
+    /// Travaux imprimés de la période `[du_ms, au_ms[`, regroupés selon l'axe.
+    pub fn agreger(&self, axe: Axe, du_ms: i64, au_ms: i64) -> rusqlite::Result<Vec<LigneBrute>> {
+        let cle = match axe {
+            Axe::Utilisateur => "t.utilisateur",
+            Axe::Service => "COALESCE(NULLIF(p.service, ''), 'Non rattaché')",
+            Axe::Cabinet => "COALESCE(NULLIF(p.cabinet, ''), 'Non rattaché')",
+            Axe::Copieur => "t.file",
+            Axe::Format => "COALESCE(NULLIF(t.format, ''), 'Inconnu')",
+        };
+        let sql = format!(
+            "SELECT {cle}, max(p.nom), t.file, t.couleur, t.recto_verso, count(*), sum(t.pages_totales), sum(t.feuilles)
+             FROM travaux t LEFT JOIN personnes p ON t.utilisateur = p.utilisateur COLLATE NOCASE
+             WHERE t.envoye_ms >= ?1 AND t.envoye_ms < ?2 AND t.statut = 'imprime'
+             GROUP BY 1, 3, 4, 5"
+        );
+        let mut s = self.conn.prepare(&sql)?;
+        s.query_map([du_ms, au_ms], |r| {
+            Ok(LigneBrute {
+                cle: r.get(0)?,
+                nom: if axe == Axe::Utilisateur { r.get(1)? } else { None },
+                file: r.get(2)?,
+                couleur: r.get(3)?,
+                recto_verso: r.get(4)?,
+                travaux: r.get(5)?,
+                pages: r.get(6)?,
+                feuilles: r.get(7)?,
+            })
+        })?
+        .collect()
+    }
+
+    /// Travaux de la période non comptés (annulés, en erreur, statut inconnu).
+    pub fn non_imprimes(&self, du_ms: i64, au_ms: i64) -> rusqlite::Result<i64> {
+        self.conn.query_row(
+            "SELECT count(*) FROM travaux WHERE envoye_ms >= ?1 AND envoye_ms < ?2 AND statut <> 'imprime'",
+            [du_ms, au_ms],
+            |r| r.get(0),
+        )
+    }
+
+    /// Dernier relevé de chaque copieur. Un relevé illisible est ignoré.
+    pub fn derniers_releves(&self) -> rusqlite::Result<Vec<ReleveCopieur>> {
+        let mut s = self.conn.prepare(
+            "SELECT contenu, max(releve_ms) FROM releves GROUP BY collecteur, copieur ORDER BY copieur",
+        )?;
+        let contenus: Vec<String> = s.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        Ok(contenus
+            .iter()
+            .filter_map(|c| serde_json::from_str(c).ok())
+            .collect())
     }
 
     /// Utilisateurs vus dans les travaux, sans fiche ou dont la fiche date d'avant `avant_ms`.
@@ -519,5 +586,61 @@ pub(crate) mod tests {
         assert_eq!(l.len(), 2);
         assert!(l[0].envoye_ms > l[1].envoye_ms);
         assert_eq!(b.travaux_de("a.exemple", 1).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn agregats_par_axe_avec_rattachement() {
+        let mut b = Base::en_memoire().unwrap();
+        let mut t1 = travail(1);
+        t1.utilisateur = "A.Exemple".into();
+        b.enregistrer(&Evenement::Travail(t1), 0).unwrap();
+        b.enregistrer(&Evenement::Travail(travail(2)), 0).unwrap();
+        let mut annule = travail(3);
+        annule.statut = tirage_modele::Statut::Annule;
+        b.enregistrer(&Evenement::Travail(annule), 0).unwrap();
+        let mut inconnu = travail(4);
+        inconnu.utilisateur = "b.exemple".into();
+        inconnu.format = None;
+        b.enregistrer(&Evenement::Travail(inconnu), 0).unwrap();
+        b.personne_trouvee("a.exemple", Some("A Exemple"), Some("Audit"), None, 0)
+            .unwrap();
+
+        let (du, au) = (0, i64::MAX);
+        let s = b.agreger(Axe::Service, du, au).unwrap();
+        let pages = |nom: &str| -> i64 { s.iter().filter(|l| l.cle == nom).map(|l| l.pages).sum() };
+        assert_eq!((pages("Audit"), pages("Non rattaché")), (12, 6), "annulé exclu");
+        let f = b.agreger(Axe::Format, du, au).unwrap();
+        assert!(f.iter().any(|l| l.cle == "Inconnu"));
+        let u = b.agreger(Axe::Utilisateur, du, au).unwrap();
+        assert!(u.iter().any(|l| l.nom.as_deref() == Some("A Exemple")));
+        assert_eq!(b.non_imprimes(du, au).unwrap(), 1);
+        // Borne haute exclue.
+        let debut = travail(1).envoye_ms;
+        assert!(b.agreger(Axe::Copieur, 0, debut).unwrap().is_empty());
+        assert_eq!(b.agreger(Axe::Copieur, debut, debut + 1).unwrap()[0].travaux, 1);
+    }
+
+    #[test]
+    fn dernier_releve_de_chaque_copieur() {
+        let mut b = Base::en_memoire().unwrap();
+        for (copieur, ms, total) in [("C1", 1, 10), ("C1", 3, 30), ("C1", 2, 20), ("C2", 1, 5)] {
+            let r = Evenement::Releve(ReleveCopieur {
+                collecteur: "impression-1".into(),
+                copieur: copieur.into(),
+                releve_ms: ms,
+                modele: None,
+                numero_serie: None,
+                compteur_total: Some(total),
+                compteur_noir: None,
+                compteur_couleur: None,
+                consommables: vec![],
+                etat: None,
+                alertes: vec![],
+            });
+            b.enregistrer(&r, 0).unwrap();
+        }
+        let l = b.derniers_releves().unwrap();
+        assert_eq!(l.len(), 2);
+        assert_eq!((l[0].copieur.as_str(), l[0].compteur_total), ("C1", Some(30)));
     }
 }
