@@ -14,6 +14,8 @@ const MDP_COMPTE: &str = "mot-de-passe-du-compte-fictif";
 const GROUPE: &str = "CN=Lecteurs,OU=Groupes,DC=example,DC=org";
 const DN_MEMBRE: &str = "CN=Membre,OU=Audit,DC=example,DC=org";
 const MDP_MEMBRE: &str = "mot-de-passe-fictif";
+const DN_SPECIAL: &str = "CN=Membre (Paie)*,OU=Audit,DC=example,DC=org";
+const REGLE_CHAINE: &str = "1.2.840.113556.1.4.1941";
 
 // --- BER minimal ---
 
@@ -87,6 +89,8 @@ struct Trace {
     liaisons: Vec<String>,
     /// Filtres bruts reçus (encodés BER).
     filtres: Vec<Vec<u8>>,
+    /// Base et portée de chaque recherche (0 : l'objet seul).
+    recherches: Vec<(String, u8)>,
 }
 
 fn contient(foin: &[u8], aiguille: &str) -> bool {
@@ -133,26 +137,46 @@ fn servir<S: Read + Write>(mut flux: S, trace: &Mutex<Trace>) {
                     let (_, mdp, _) = lire(r).unwrap();
                     let (dn, mdp) = (String::from_utf8_lossy(dn).into_owned(), mdp.to_vec());
                     let bon = (dn == COMPTE && mdp == MDP_COMPTE.as_bytes())
-                        || (dn == DN_MEMBRE && mdp == MDP_MEMBRE.as_bytes());
+                        || ((dn == DN_MEMBRE || dn == DN_SPECIAL) && mdp == MDP_MEMBRE.as_bytes());
                     trace.lock().unwrap().liaisons.push(dn);
                     vec![message(id, resultat(0x61, if bon { 0 } else { 49 }))]
                 }
                 0x63 => {
+                    let (_, base, reste) = lire(op).unwrap();
+                    let (_, portee, _) = lire(reste).unwrap();
+                    let base = String::from_utf8_lossy(base).into_owned();
                     let mut r = op;
                     for _ in 0..6 {
                         r = lire(r).unwrap().2; // base, portée, alias, limites, types
                     }
                     let (t, f, _) = lire(r).unwrap();
                     let filtre = tlv(t, f);
-                    let groupe = contient(&filtre, GROUPE);
                     let e = egalites(&filtre);
                     let cherche = |nom: &str| {
                         e.iter()
                             .any(|(a, v)| a == "sAMAccountName" && v.eq_ignore_ascii_case(nom))
                     };
-                    let (membre, autre) = (cherche("membre"), cherche("autre.exemple"));
-                    trace.lock().unwrap().filtres.push(filtre);
+                    // Comme un annuaire où le compte de lecture ne peut pas lire memberOf : aucune réponse, aucune erreur.
+                    let sans_droit = contient(&filtre, "memberOf");
+                    let (membre, special, autre) = (
+                        !sans_droit && cherche("membre"),
+                        !sans_droit && cherche("special"),
+                        !sans_droit && cherche("autre.exemple"),
+                    );
+                    // Le groupe répond à la règle en chaîne sur member, pour ses seuls membres.
+                    let dans_le_groupe = base == GROUPE
+                        && contient(&filtre, "member")
+                        && contient(&filtre, REGLE_CHAINE)
+                        && (contient(&filtre, DN_MEMBRE) || contient(&filtre, DN_SPECIAL));
+                    {
+                        let mut t = trace.lock().unwrap();
+                        t.recherches.push((base, portee.first().copied().unwrap_or(9)));
+                        t.filtres.push(filtre);
+                    }
                     let mut rep = Vec::new();
+                    if dans_le_groupe {
+                        rep.push(message(id, entree(GROUPE, &[])));
+                    }
                     if membre {
                         rep.push(message(
                             id,
@@ -166,7 +190,10 @@ fn servir<S: Read + Write>(mut flux: S, trace: &Mutex<Trace>) {
                             ),
                         ));
                     }
-                    if autre && !groupe {
+                    if special {
+                        rep.push(message(id, entree(DN_SPECIAL, &[("sAMAccountName", "special")])));
+                    }
+                    if autre {
                         rep.push(message(
                             id,
                             entree(
@@ -248,9 +275,20 @@ fn membre_du_groupe_avec_le_bon_mot_de_passe() {
     assert_eq!(i.nom.as_deref(), Some("Membre Exemple"));
     let t = b.trace.lock().unwrap();
     assert_eq!(t.liaisons, vec![COMPTE.to_owned(), DN_MEMBRE.to_owned()]);
-    // Le groupe est bien dans le filtre, avec la règle des groupes imbriqués.
-    assert!(contient(&t.filtres[0], GROUPE));
-    assert!(contient(&t.filtres[0], "1.2.840.113556.1.4.1941"));
+    // La personne est cherchée sans memberOf, puis le groupe seul est interrogé, avec la règle des groupes imbriqués.
+    assert!(!contient(&t.filtres[0], "memberOf"));
+    assert_eq!(t.recherches[1], (GROUPE.to_owned(), 0));
+    assert!(contient(&t.filtres[1], DN_MEMBRE));
+    assert!(contient(&t.filtres[1], REGLE_CHAINE));
+    assert!(!contient(&t.filtres[1], "memberOf"));
+}
+
+#[test]
+fn dn_avec_caracteres_speciaux_echappe_dans_le_controle_du_groupe() {
+    let b = banc();
+    assert!(b.annuaire.authentifier("special", MDP_MEMBRE).is_ok());
+    // L'étoile et les parenthèses sont arrivées comme un littéral, pas comme un filtre.
+    assert!(contient(&b.trace.lock().unwrap().filtres[1], DN_SPECIAL));
 }
 
 #[test]

@@ -183,6 +183,19 @@ impl Ldap {
             .map(SearchEntry::construct)
             .collect())
     }
+
+    /// Appartenance au groupe autorisé, groupes imbriqués compris, lue depuis le groupe : un compte de lecture peut
+    /// voir `member` sur le groupe sans avoir le droit de lire `memberOf` sur les personnes, et une recherche sur un
+    /// attribut illisible ne rend rien, sans erreur. Un groupe introuvable remonte en erreur, pas en refus.
+    fn est_membre(&self, c: &mut LdapConn, dn: &str) -> Result<bool, String> {
+        let filtre = format!("(member:{REGLE_CHAINE}:={})", ldap_escape(dn));
+        let (entrees, _) = c
+            .with_timeout(DELAI)
+            .search(&self.cfg.groupe_autorise, Scope::Base, &filtre, vec!["1.1"])
+            .and_then(ldap3::SearchResult::success)
+            .map_err(texte_erreur)?;
+        Ok(entrees.iter().any(|e| !e.is_ref() && !e.is_intermediate()))
+    }
 }
 
 impl Annuaire for Ldap {
@@ -193,20 +206,23 @@ impl Annuaire for Ldap {
         }
         let mut c = self.connecter_lecture().map_err(ErreurAuth::Indisponible)?;
         let filtre = format!(
-            "(&{}({}={})(memberOf:{REGLE_CHAINE}:={}))",
+            "(&{}({}={}))",
             self.cfg.filtre_personnes,
             self.cfg.attribut_identifiant,
             ldap_escape(login),
-            ldap_escape(&self.cfg.groupe_autorise),
         );
         let entrees = self
             .chercher(&mut c, &filtre, 2)
             .map_err(ErreurAuth::Indisponible)?;
-        let _ = c.unbind();
         let [e] = entrees.as_slice() else {
             return Err(ErreurAuth::Refus);
         };
         let fiche = self.fiche(e).ok_or(ErreurAuth::Refus)?;
+        let membre = self.est_membre(&mut c, &e.dn).map_err(ErreurAuth::Indisponible)?;
+        let _ = c.unbind();
+        if !membre {
+            return Err(ErreurAuth::Refus);
+        }
 
         // Le mot de passe se vérifie sur une connexion à part, jamais réutilisée.
         let mut c = self
