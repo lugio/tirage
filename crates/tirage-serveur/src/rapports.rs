@@ -6,6 +6,10 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
+use jiff::Timestamp;
+use jiff::civil::Date;
+use jiff::tz::TimeZone;
+
 use crate::base::LigneBrute;
 use crate::config::ConfigCouts;
 
@@ -71,6 +75,18 @@ pub struct Ligne {
 }
 
 impl Ligne {
+    pub fn lire_pages(&self) -> i64 {
+        self.pages
+    }
+
+    pub fn lire_couleur(&self) -> i64 {
+        self.couleur
+    }
+
+    pub fn lire_cout(&self) -> i64 {
+        self.cout
+    }
+
     fn ajouter(&mut self, b: &LigneBrute, couts: &ConfigCouts) {
         self.travaux += b.travaux;
         self.pages += b.pages;
@@ -194,6 +210,93 @@ pub fn csv(axe: Axe, lignes: &[Ligne], devise: &str) -> String {
     s
 }
 
+/// Au-delà, l'évolution se lit par mois : des colonnes par jour ne seraient plus lisibles.
+const JOURS_MAX_PAR_JOUR: i32 = 62;
+
+/// Pages d'une tranche de temps, avec les mêmes règles de mode couleur que [`Ligne`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tranche {
+    pub libelle: String,
+    pub noir: i64,
+    pub couleur: i64,
+    pub inconnu: i64,
+}
+
+impl Tranche {
+    fn ajouter(&mut self, mode: &str, pages: i64) {
+        match mode {
+            "couleur" => self.couleur += pages,
+            "noir_et_blanc" => self.noir += pages,
+            _ => self.inconnu += pages,
+        }
+    }
+}
+
+/// Évolution sur `[du, au]` : par jour, ou par mois si la période est longue ou contient des totaux archivés (ils ne
+/// sont connus qu'au mois). Toutes les tranches sont présentes, y compris à zéro, pour un axe du temps régulier.
+pub fn evolution(
+    du: Date,
+    au: Date,
+    fuseau: &TimeZone,
+    detail: &[(i64, String, i64)],
+    archives: &[(String, String, i64)],
+) -> Vec<Tranche> {
+    let jours = du.until(au).map_or(0, |s| s.get_days());
+    let par_mois = !archives.is_empty() || jours > JOURS_MAX_PAR_JOUR;
+    let cle = |d: Date| {
+        if par_mois {
+            d.strftime("%Y-%m").to_string()
+        } else {
+            d.strftime("%Y-%m-%d").to_string()
+        }
+    };
+    let mut tranches: Vec<(String, Tranche)> = Vec::new();
+    let mut d = du;
+    while d <= au {
+        let k = cle(d);
+        if tranches.last().is_none_or(|(c, _)| *c != k) {
+            let libelle = if par_mois {
+                d.strftime("%m/%Y")
+            } else {
+                d.strftime("%d/%m")
+            }
+            .to_string();
+            tranches.push((
+                k,
+                Tranche {
+                    libelle,
+                    noir: 0,
+                    couleur: 0,
+                    inconnu: 0,
+                },
+            ));
+        }
+        match d.tomorrow() {
+            Ok(s) => d = s,
+            Err(_) => break,
+        }
+    }
+    let index: HashMap<String, usize> = tranches
+        .iter()
+        .enumerate()
+        .map(|(i, (k, _))| (k.clone(), i))
+        .collect();
+    let mut poser = |k: &str, mode: &str, pages: i64| {
+        if let Some(i) = index.get(k) {
+            tranches[*i].1.ajouter(mode, pages);
+        }
+    };
+    for (ms, mode, pages) in detail {
+        if let Ok(t) = Timestamp::from_millisecond(*ms) {
+            poser(&cle(t.to_zoned(fuseau.clone()).date()), mode, *pages);
+        }
+    }
+    for (mois, mode, pages) in archives {
+        poser(mois, mode, *pages);
+    }
+    tranches.into_iter().map(|(_, t)| t).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,6 +397,64 @@ mod tests {
             lignes[1].starts_with("\"'=SOMME(A1);\"\"x\"\"\";'-danger;1;2;0;2;0;0;2;0,20;0"),
             "{}",
             lignes[1]
+        );
+    }
+
+    fn paris() -> TimeZone {
+        TimeZone::get("Europe/Paris").unwrap()
+    }
+
+    fn date(a: i16, m: i8, j: i8) -> Date {
+        Date::new(a, m, j).unwrap()
+    }
+
+    fn ms(texte: &str) -> i64 {
+        texte.parse::<Timestamp>().unwrap().as_millisecond()
+    }
+
+    #[test]
+    fn evolution_par_jour_dans_le_fuseau_avec_tous_les_jours() {
+        let detail = vec![
+            // 00:30 à Paris le 01/11, encore le 31/10 en UTC.
+            (ms("2026-10-31T23:30:00Z"), "noir_et_blanc".to_owned(), 10),
+            (ms("2026-11-03T08:00:00Z"), "couleur".to_owned(), 5),
+            (ms("2026-11-03T09:00:00Z"), "inconnu".to_owned(), 2),
+        ];
+        let v = evolution(date(2026, 11, 1), date(2026, 11, 3), &paris(), &detail, &[]);
+        assert_eq!(
+            v.iter().map(|t| t.libelle.as_str()).collect::<Vec<_>>(),
+            ["01/11", "02/11", "03/11"]
+        );
+        assert_eq!((v[0].noir, v[1].noir, v[2].couleur, v[2].inconnu), (10, 0, 5, 2));
+    }
+
+    #[test]
+    fn evolution_au_changement_d_heure() {
+        // Le 25/10/2026 à Paris dure 25 heures : 22:30 UTC est encore le 25, 23:30 UTC déjà le 26.
+        let detail = vec![
+            (ms("2026-10-25T22:30:00Z"), "couleur".to_owned(), 1),
+            (ms("2026-10-25T23:30:00Z"), "couleur".to_owned(), 2),
+        ];
+        let v = evolution(date(2026, 10, 25), date(2026, 10, 26), &paris(), &detail, &[]);
+        assert_eq!((v[0].couleur, v[1].couleur), (1, 2));
+    }
+
+    #[test]
+    fn evolution_par_mois_si_longue_ou_archivee() {
+        let detail = vec![(ms("2026-03-10T12:00:00Z"), "couleur".to_owned(), 3)];
+        let v = evolution(date(2026, 1, 15), date(2026, 4, 2), &paris(), &detail, &[]);
+        assert_eq!(
+            v.iter().map(|t| t.libelle.as_str()).collect::<Vec<_>>(),
+            ["01/2026", "02/2026", "03/2026", "04/2026"]
+        );
+        assert_eq!(v[2].couleur, 3);
+
+        // Période courte, mais un total archivé n'est connu qu'au mois : il ne doit pas tomber sur un jour inventé.
+        let archives = vec![("2026-02".to_owned(), "noir_et_blanc".to_owned(), 7)];
+        let v = evolution(date(2026, 2, 1), date(2026, 3, 3), &paris(), &[], &archives);
+        assert_eq!(
+            v.iter().map(|t| (t.libelle.as_str(), t.noir)).collect::<Vec<_>>(),
+            [("02/2026", 7), ("03/2026", 0)]
         );
     }
 }
