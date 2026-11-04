@@ -25,6 +25,7 @@ use serde::Deserialize;
 use crate::annuaire::{Annuaire, ErreurAuth, identifiant_nu};
 use crate::base::Base;
 use crate::config::{ConfigCouts, ConfigInterface};
+use crate::conservation::limite_ms;
 use crate::rapports::{self, Axe, Ligne};
 use crate::session::{Limiteur, Session, Sessions};
 
@@ -59,10 +60,16 @@ pub struct Interface {
     cookie_securise: bool,
     fuseau: TimeZone,
     couts: ConfigCouts,
+    detail_mois: u32,
 }
 
 impl Interface {
-    pub fn nouvelle(annuaire: Arc<dyn Annuaire>, c: &ConfigInterface, couts: ConfigCouts) -> Self {
+    pub fn nouvelle(
+        annuaire: Arc<dyn Annuaire>,
+        c: &ConfigInterface,
+        couts: ConfigCouts,
+        detail_mois: u32,
+    ) -> Self {
         Interface {
             annuaire,
             sessions: Sessions::nouvelles(c.session_minutes, c.inactivite_minutes),
@@ -71,6 +78,19 @@ impl Interface {
             // La configuration a déjà validé le nom du fuseau.
             fuseau: TimeZone::get(&c.fuseau).unwrap_or(TimeZone::UTC),
             couts,
+            detail_mois,
+        }
+    }
+
+    /// Avis si la période remonte avant la limite de conservation du détail.
+    fn avis_conservation(&self, p: &Periode, maintenant_ms: i64) -> String {
+        match limite_ms(maintenant_ms, self.detail_mois, &self.fuseau) {
+            Some(limite) if p.du_ms < limite => format!(
+                "<p class=\"note\">Le détail est effacé au-delà de {} mois : avant cette limite, seuls comptent des \
+                 totaux sans nom, et seulement pour les mois entiers de la période.</p>",
+                self.detail_mois
+            ),
+            _ => String::new(),
         }
     }
 
@@ -407,6 +427,26 @@ impl Periode {
         format!("{}..{}", self.du, self.au)
     }
 
+    /// Premier et dernier mois entièrement compris dans la période (« AAAA-MM ») : les totaux archivés sont mensuels.
+    fn mois_entiers(&self) -> Option<(String, String)> {
+        let premier = if self.du.day() == 1 {
+            self.du
+        } else {
+            self.du.last_of_month().tomorrow().ok()?
+        };
+        let dernier = if self.au == self.au.last_of_month() {
+            self.au
+        } else {
+            self.au.first_of_month().yesterday().ok()?
+        };
+        (premier <= dernier).then(|| {
+            (
+                premier.strftime("%Y-%m").to_string(),
+                dernier.strftime("%Y-%m").to_string(),
+            )
+        })
+    }
+
     fn requete(&self) -> String {
         format!("du={}&au={}", self.du, self.au)
     }
@@ -444,13 +484,18 @@ async fn lire_rapports(
 ) -> Result<(Vec<Vec<Ligne>>, i64), Box<Response>> {
     let (maintenant, lecteur) = ((c.horloge)(), lecteur.to_owned());
     let (cible, du, au) = (periode.texte(), periode.du_ms, periode.au_ms);
+    let mois = periode.mois_entiers();
     let interface = Arc::clone(&c.interface);
     avec_base(&c.base, move |b| {
         // Journal d'abord : sans trace, pas de données.
         b.consigner(maintenant, &lecteur, &action, Some(&cible))?;
         let mut lignes = Vec::with_capacity(axes.len());
         for axe in axes {
-            lignes.push(rapports::construire(&b.agreger(axe, du, au)?, &interface.couts));
+            let mut brutes = b.agreger(axe, du, au)?;
+            if let Some((premier, dernier)) = &mois {
+                brutes.extend(b.totaux_archives(axe, premier, dernier)?);
+            }
+            lignes.push(rapports::construire(&brutes, &interface.couts));
         }
         Ok((lignes, b.non_imprimes(du, au)?))
     })
@@ -543,6 +588,7 @@ async fn accueil(
     ));
     h.push_str("</div>");
     h.push_str(&note_sur_le_calcul(&t, non_imprimes, &i.couts.devise));
+    h.push_str(&i.avis_conservation(&periode, (c.horloge)()));
     h.push_str("<p>Par ");
     let liens: Vec<String> = Axe::TOUS
         .iter()
@@ -589,6 +635,7 @@ async fn rapport(
         periode.requete()
     );
     h.push_str(&note_sur_le_calcul(&t, non_imprimes, &i.couts.devise));
+    h.push_str(&i.avis_conservation(&periode, (c.horloge)()));
     let _ = write!(h, "<table><tr><th>{}</th>", echapper(axe.titre()));
     if axe == Axe::Utilisateur {
         h.push_str("<th>Nom</th>");
@@ -741,6 +788,7 @@ async fn palmares(
     let vide = Vec::new();
     let [u, sv, co] = [0, 1, 2].map(|n| lu.get(n).unwrap_or(&vide));
     let mut h = periode.formulaire("/palmares");
+    h.push_str(&c.interface.avis_conservation(&periode, (c.horloge)()));
     h.push_str("<div class=\"palmares\">");
     h.push_str(&liste_palmares("Utilisateurs : pages", u, |l| l.pages, entier));
     h.push_str(&liste_palmares(
@@ -999,7 +1047,7 @@ mod tests {
         };
         let a: Arc<dyn Annuaire> = annuaire.clone();
         let c = Contexte {
-            interface: Arc::new(Interface::nouvelle(a, &conf, couts_fictifs())),
+            interface: Arc::new(Interface::nouvelle(a, &conf, couts_fictifs(), 12)),
             base: Arc::clone(&base),
             horloge: || MAINTENANT,
         };
@@ -1441,6 +1489,83 @@ mod tests {
         assert!(r.texte.contains("COPIEUR-&lt;1&gt;"));
         assert!(r.texte.contains("12\u{202f}345"));
         assert!(r.texte.contains("Noir : 40 %"));
+    }
+
+    #[tokio::test]
+    async fn apres_la_purge_les_rapports_gardent_les_totaux_sans_nom() {
+        let b = banc();
+        const AN_DERNIER: i64 = MAINTENANT - 400 * 86_400_000; // 2025-10-11
+        {
+            let mut base = b.base.lock().unwrap();
+            let mut t = travail(1);
+            t.utilisateur = "a.exemple".into();
+            t.envoye_ms = AN_DERNIER;
+            t.nom_document = Some("document-confidentiel-fictif.pdf".into());
+            base.enregistrer(&Evenement::Travail(t), 0).unwrap();
+            base.personne_trouvee("a.exemple", Some("A Exemple"), Some("Audit"), None, 0)
+                .unwrap();
+            let limite = MAINTENANT - 365 * 86_400_000;
+            base.purger(limite, limite, |ms| {
+                crate::conservation::mois_de(ms, &TimeZone::UTC)
+            })
+            .unwrap();
+        }
+        let cookie = b.connecter().await;
+
+        // Mois entier : le total reste, par service, avec l'avis.
+        let r = b
+            .get("/rapports/service?du=2025-10-01&au=2025-10-31", Some(&cookie))
+            .await;
+        assert!(
+            r.texte.contains("Audit") && r.texte.contains("<td class=\"n\">6</td>"),
+            "{}",
+            r.texte
+        );
+        assert!(r.texte.contains("Le détail est effacé au-delà de 12 mois"));
+
+        // Morceau de mois : les totaux mensuels ne se découpent pas.
+        let r = b
+            .get("/rapports/service?du=2025-10-05&au=2025-10-20", Some(&cookie))
+            .await;
+        assert!(!r.texte.contains("Audit"));
+
+        // Plus personne par utilisateur, ni palmarès, ni détail.
+        for chemin in [
+            "/rapports/utilisateur?du=2025-10-01&au=2025-10-31",
+            "/rapports/utilisateur/csv?du=2025-10-01&au=2025-10-31",
+            "/palmares?du=2025-10-01&au=2025-10-31",
+            "/utilisateurs/a.exemple",
+        ] {
+            let r = b.get(chemin, Some(&cookie)).await;
+            assert_eq!(r.code, StatusCode::OK);
+            assert!(!r.texte.contains("confidentiel"), "{chemin}");
+            assert!(!r.texte.contains("A Exemple"), "{chemin}");
+            if !chemin.starts_with("/utilisateurs") {
+                assert!(!r.texte.contains("a.exemple"), "{chemin}");
+            }
+        }
+
+        // Période récente : pas d'avis.
+        let r = b.get("/", Some(&cookie)).await;
+        assert!(!r.texte.contains("Le détail est effacé"));
+    }
+
+    #[test]
+    fn mois_entiers_d_une_periode() {
+        let z = TimeZone::UTC;
+        let p = |du: &str, au: &str| {
+            let d = Demande {
+                du: Some(du.into()),
+                au: Some(au.into()),
+            };
+            Periode::lire(&d, MAINTENANT, &z).unwrap().mois_entiers()
+        };
+        let m = |a: &str, b: &str| Some((a.to_owned(), b.to_owned()));
+        assert_eq!(p("2025-10-01", "2025-10-31"), m("2025-10", "2025-10"));
+        assert_eq!(p("2025-10-02", "2025-12-30"), m("2025-11", "2025-11"));
+        assert_eq!(p("2024-02-01", "2024-02-29"), m("2024-02", "2024-02"));
+        assert_eq!(p("2025-10-05", "2025-10-20"), None);
+        assert_eq!(p("2025-10-05", "2025-11-20"), None);
     }
 
     #[test]
