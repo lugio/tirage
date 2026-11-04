@@ -51,6 +51,7 @@ fn serveur() -> (String, Arc<Mutex<Base>>) {
         config: Arc::new(config),
         base: Arc::clone(&base),
         horloge: || 0,
+        interface: None,
     };
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {

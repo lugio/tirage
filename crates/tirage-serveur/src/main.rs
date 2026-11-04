@@ -1,14 +1,17 @@
 //! tirage — serveur.
 //!
-//! `--config FICHIER` : reçoit les événements des collecteurs (HTTP ; à placer derrière un mandataire HTTPS).
+//! `--config FICHIER` : reçoit les événements des collecteurs et, si un annuaire est configuré, sert l'interface
+//! (HTTP ; à placer derrière un mandataire HTTPS).
 //! `--nouveau-jeton NOM` : fabrique le jeton d'un collecteur et la ligne à ajouter à la configuration.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use tirage_serveur::annuaire::{self, Annuaire, Ldap};
 use tirage_serveur::api::{self, Etat};
 use tirage_serveur::base::Base;
 use tirage_serveur::config::{self, Config};
+use tirage_serveur::interface::Interface;
 
 fn texte_version() -> String {
     format!(
@@ -70,9 +73,20 @@ fn servir(chemin: PathBuf) -> Result<(), String> {
     }
     let base = Base::ouvrir(&cfg.base).map_err(|e| format!("base {} : {e}", cfg.base.display()))?;
     let ecoute = cfg.ecoute.clone();
+    let base = Arc::new(Mutex::new(base));
+    let annuaire: Option<(Arc<dyn Annuaire>, u32)> = match &cfg.annuaire {
+        Some(a) => Some((Arc::new(Ldap::nouveau(a)?), a.rafraichissement_minutes)),
+        None => {
+            eprintln!("pas d'annuaire configuré : aucune interface web, seule la réception tourne");
+            None
+        }
+    };
     let etat = Etat {
+        interface: annuaire
+            .as_ref()
+            .map(|(a, _)| Arc::new(Interface::nouvelle(Arc::clone(a), &cfg.interface))),
         config: Arc::new(cfg),
-        base: Arc::new(Mutex::new(base)),
+        base: Arc::clone(&base),
         horloge: maintenant_ms,
     };
     let rt = tokio::runtime::Runtime::new().map_err(|e| e.to_string())?;
@@ -81,6 +95,9 @@ fn servir(chemin: PathBuf) -> Result<(), String> {
             .await
             .map_err(|e| format!("écoute {ecoute} : {e}"))?;
         eprintln!("{} — écoute sur {ecoute}", texte_version());
+        if let Some((a, minutes)) = annuaire {
+            tokio::spawn(rafraichir_les_fiches(a, base, minutes));
+        }
         axum::serve(ecouteur, api::routeur(etat))
             .with_graceful_shutdown(async {
                 let _ = tokio::signal::ctrl_c().await;
@@ -88,6 +105,31 @@ fn servir(chemin: PathBuf) -> Result<(), String> {
             .await
             .map_err(|e| e.to_string())
     })
+}
+
+/// Relit régulièrement les fiches de l'annuaire. Le journal ne cite aucune personne.
+async fn rafraichir_les_fiches(a: Arc<dyn Annuaire>, base: Arc<Mutex<Base>>, minutes: u32) {
+    let periode = std::time::Duration::from_secs(u64::from(minutes.min(5)) * 60);
+    let age_max = i64::from(minutes) * 60_000;
+    loop {
+        let (a2, b2) = (Arc::clone(&a), Arc::clone(&base));
+        let r = tokio::task::spawn_blocking(move || {
+            annuaire::synchroniser(&b2, a2.as_ref(), maintenant_ms(), age_max)
+        })
+        .await;
+        match r {
+            Ok(Ok(bilan)) if bilan.verifies > 0 => {
+                eprintln!(
+                    "annuaire : {} fiche(s) relue(s), {} absente(s)",
+                    bilan.verifies, bilan.absents
+                );
+            }
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => eprintln!("annuaire : relecture impossible : {e}"),
+            Err(e) => eprintln!("annuaire : relecture interrompue : {e}"),
+        }
+        tokio::time::sleep(periode).await;
+    }
 }
 
 #[cfg(test)]

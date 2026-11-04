@@ -10,3 +10,30 @@ base = "/var/lib/tirage/tirage.sqlite"
 nom = "impression-1"
 # Empreinte du jeton fictif « jeton-exemple-a-remplacer ».
 jeton_sha256 = "fe07e7e309d0f68ee75070ca27bae0c82de85d018d82341e91175d7bc718fdf1"
+
+# Annuaire, en lecture seule : service et cabinet des personnes, connexion à l'interface.
+# Sans cette section, l'interface web n'existe pas : seule la réception des collecteurs tourne.
+[annuaire]
+url = "ldaps://annuaire.example.org:636"
+# Autorité qui a signé le certificat de l'annuaire (facultatif : sinon, magasin du système).
+ca = "/etc/tirage/autorite.pem"
+base = "DC=example,DC=org"
+compte = "CN=lecture-annuaire,OU=Comptes,DC=example,DC=org"
+# Le mot de passe du compte est dans ce fichier (droits 600), jamais ici.
+mot_de_passe_fichier = "/etc/tirage/annuaire.secret"
+# Seuls les membres de ce groupe (groupes imbriqués compris) se connectent.
+groupe_autorise = "CN=Lecteurs-Impressions,OU=Groupes,DC=example,DC=org"
+# Attribut LDAP, ou « dn:ou » pour la première unité d'organisation du DN.
+attribut_service = "department"
+attribut_cabinet = "company"
+# Valeurs par défaut :
+# attribut_identifiant = "sAMAccountName"
+# attribut_nom = "displayName"
+# filtre_personnes = "(&(objectCategory=person)(objectClass=user))"
+# rafraichissement_minutes = 60
+
+# Valeurs par défaut :
+# [interface]
+# session_minutes = 240
+# inactivite_minutes = 30
+# http_en_clair = false     # true retire « Secure » du cookie : essai sans HTTPS seulement

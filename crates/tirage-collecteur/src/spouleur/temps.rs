@@ -2,6 +2,8 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub use tirage_modele::iso_utc;
+
 pub fn maintenant_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -23,28 +25,6 @@ pub fn systemtime_vers_ms(an: u16, mois: u16, jour: u16, h: u16, mi: u16, s: u16
     let ade_jours = ade * 365 + ade / 4 - ade / 100 + adj;
     let jours = ere * 146_097 + ade_jours - 719_468;
     Some(((jours * 24 + i64::from(h)) * 60 + i64::from(mi)) * 60_000 + i64::from(s) * 1000 + i64::from(ms))
-}
-
-/// Millisecondes Unix → « AAAA-MM-JJTHH:MM:SSZ » (UTC), pour les journaux.
-pub fn iso_utc(ms: i64) -> String {
-    let s = ms.div_euclid(1000);
-    let (jours, reste) = (s.div_euclid(86_400), s.rem_euclid(86_400));
-    // « civil from days » (inverse de l'algorithme ci-dessus).
-    let z = jours + 719_468;
-    let ere = z.div_euclid(146_097);
-    let doe = z - ere * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let jour = doy - (153 * mp + 2) / 5 + 1;
-    let mois = if mp < 10 { mp + 3 } else { mp - 9 };
-    let an = yoe + ere * 400 + i64::from(mois <= 2);
-    format!(
-        "{an:04}-{mois:02}-{jour:02}T{:02}:{:02}:{:02}Z",
-        reste / 3600,
-        reste % 3600 / 60,
-        reste % 60
-    )
 }
 
 #[cfg(test)]
