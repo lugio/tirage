@@ -122,6 +122,30 @@ pub fn onglets(liens: &[(String, &str, bool)]) -> String {
     h
 }
 
+/// Durée lisible, en français.
+pub fn duree(ms: i64) -> String {
+    let s = (ms.max(0) + 500) / 1000;
+    match s {
+        0..60 => format!("{s} s"),
+        60..3600 => format!("{} min {} s", s / 60, s % 60),
+        _ => format!("{} h {} min", s / 3600, s % 3600 / 60),
+    }
+}
+
+/// Taille lisible, en français.
+pub fn taille(octets: i64) -> String {
+    const KO: i64 = 1024;
+    const MO: i64 = 1024 * KO;
+    if octets < KO {
+        return format!("{} o", octets.max(0));
+    }
+    if octets < MO {
+        return format!("{} Ko", (octets + KO / 2) / KO);
+    }
+    let dixiemes = (octets * 10 + MO / 2) / MO;
+    format!("{},{} Mo", dixiemes / 10, dixiemes % 10)
+}
+
 pub fn bouton_lien(href: &str, libelle: &str) -> String {
     format!(
         "<p><a class=\"bouton\" href=\"{}\">{}</a></p>",
