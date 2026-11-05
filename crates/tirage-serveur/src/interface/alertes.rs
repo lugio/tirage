@@ -17,6 +17,13 @@ impl Niveau {
             Niveau::Attention => "À prévoir",
         }
     }
+
+    pub fn classe(self) -> &'static str {
+        match self {
+            Niveau::Urgent => "urgent",
+            Niveau::Attention => "attention",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

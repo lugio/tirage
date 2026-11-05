@@ -14,18 +14,20 @@ pub const FEUILLE_DE_STYLE: &str = include_str!("style.css");
 pub enum Rubrique {
     Accueil,
     Palmares,
+    Rapports,
     Copieurs,
     Tarifs,
     Journal,
     Aucune,
 }
 
-const NAVIGATION: [(Rubrique, &str, &str); 5] = [
+const NAVIGATION: [(Rubrique, &str, &str); 6] = [
     (Rubrique::Accueil, "/", "Accueil"),
     (Rubrique::Palmares, "/palmares", "Palmarès"),
+    (Rubrique::Rapports, "/rapports/service", "Rapports"),
     (Rubrique::Copieurs, "/copieurs", "Copieurs"),
     (Rubrique::Tarifs, "/tarifs", "Tarifs"),
-    (Rubrique::Journal, "/journal", "Journal des consultations"),
+    (Rubrique::Journal, "/journal", "Journal"),
 ];
 
 pub fn echapper(s: &str) -> String {
@@ -57,7 +59,7 @@ pub fn encoder_chemin(s: &str) -> String {
 }
 
 fn navigation(rubrique: Rubrique, qui: &str) -> String {
-    let mut h = String::from("<nav>");
+    let mut h = String::from("<nav aria-label=\"Navigation principale\">");
     for (r, href, libelle) in NAVIGATION {
         let actif = if r == rubrique {
             " aria-current=\"page\""
@@ -84,8 +86,8 @@ pub fn page(rubrique: Rubrique, titre: &str, corps: &str, session: Option<&Sessi
         "<!doctype html><html lang=\"fr\"><head><meta charset=\"utf-8\"><title>{t} — Tirage</title>\
          <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
          <link rel=\"stylesheet\" href=\"/style.css\"></head><body>\
-         <header><span class=\"marque\">Tirage</span>{nav}</header>\
-         <main><h1>{t}</h1>{corps}</main></body></html>",
+         <a class=\"evitement\" href=\"#contenu\">Aller au contenu</a><header><span class=\"marque\">Tirage</span>{nav}</header>\
+         <main id=\"contenu\"><h1>{t}</h1>{corps}</main></body></html>",
         t = echapper(titre)
     )
 }
@@ -247,6 +249,8 @@ impl Cellule {
 pub struct Tableau {
     html: String,
     lignes: usize,
+    entete: bool,
+    a_un_lien: bool,
 }
 
 impl Tableau {
@@ -257,7 +261,12 @@ impl Tableau {
             let _ = write!(html, "<th{classe}>{}</th>", echapper(&c.titre));
         }
         html.push_str("</tr></thead><tbody>");
-        Tableau { html, lignes: 0 }
+        Tableau {
+            html,
+            lignes: 0,
+            entete: true,
+            a_un_lien: false,
+        }
     }
 
     /// Classement sans en-tête : le titre de la section suffit.
@@ -265,6 +274,8 @@ impl Tableau {
         Tableau {
             html: String::from("<div class=\"defile\"><table><tbody>"),
             lignes: 0,
+            entete: false,
+            a_un_lien: false,
         }
     }
 
@@ -279,6 +290,7 @@ impl Tableau {
     fn ajouter(&mut self, ouverture: &str, cellules: impl IntoIterator<Item = Cellule>) {
         self.html.push_str(ouverture);
         for c in cellules {
+            self.a_un_lien |= matches!(c, Cellule::Lien { .. });
             c.ecrire(&mut self.html);
         }
         self.html.push_str("</tr>");
@@ -287,6 +299,14 @@ impl Tableau {
 
     pub fn fin(mut self) -> String {
         self.html.push_str("</tbody></table></div>");
+        // Sans lien à l'intérieur, le clavier ne pourrait pas faire défiler un tableau trop large.
+        if self.entete && !self.a_un_lien {
+            self.html = self.html.replacen(
+                "<div class=\"defile\">",
+                "<div class=\"defile\" tabindex=\"0\" role=\"region\" aria-label=\"Tableau, défilement horizontal\">",
+                1,
+            );
+        }
         self.html
     }
 
@@ -327,6 +347,16 @@ mod tests {
     }
 
     #[test]
+    fn un_tableau_sans_lien_defile_au_clavier() {
+        let mut sans = Tableau::nouveau(&[Colonne::texte("A")]);
+        sans.ligne([Cellule::texte("x")]);
+        assert!(sans.fin().contains("tabindex=\"0\""));
+        let mut avec = Tableau::nouveau(&[Colonne::texte("A")]);
+        avec.ligne([Cellule::utilisateur("x")]);
+        assert!(!avec.fin().contains("tabindex"));
+    }
+
+    #[test]
     fn un_tableau_vide_laisse_place_au_message() {
         let t = Tableau::nouveau(&[Colonne::texte("Quand")]);
         assert_eq!(t.fin_ou("Rien."), "<p class=\"note\">Rien.</p>");
@@ -338,7 +368,7 @@ mod tests {
         assert!(h.contains("<a href=\"/palmares\" aria-current=\"page\">"), "{h}");
         assert!(h.contains("<a href=\"/\">"), "{h}");
         assert!(h.contains("&lt;Nom&gt;"), "{h}");
-        assert!(!page(Rubrique::Aucune, "T", "", None).contains("<nav>"));
+        assert!(!page(Rubrique::Aucune, "T", "", None).contains("<nav"));
     }
 
     #[test]

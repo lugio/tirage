@@ -568,7 +568,7 @@ fn programme_complet_connexion_fiche_et_journal() {
     assert!(detail.contains("document-fictif.pdf"));
 
     let (_, j) = voir("/journal");
-    assert!(j.contains("detail_utilisateur") && j.contains("connexion_refusee"));
+    assert!(j.contains("Fiche d&#39;une personne") && j.contains("Connexion refusée"));
 }
 
 // --- LDAPS ---
