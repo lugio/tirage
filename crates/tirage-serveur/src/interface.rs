@@ -35,7 +35,7 @@ use gabarit::{
     Cellule, Colonne, FEUILLE_DE_STYLE, Rubrique, Tableau, bouton_lien, carte, duree, encoder_chemin, entier,
     erreur, note, onglets, page, taille, tuiles,
 };
-use graphique::{Point, Serie, barre, colonnes_empilees, legende, segments};
+use graphique::{Point, Serie, barre, colonnes_empilees, jauge, legende, segments};
 
 const COOKIE: &str = "tirage_session";
 const CORPS_MAX: usize = 16 * 1024;
@@ -621,8 +621,7 @@ async fn accueil(
         &bloc_evolution(&tranches),
     ));
     h.push_str("<div class=\"grille\">");
-    h.push_str(&carte("Noir et blanc, couleur", &bloc_repartition(&t)));
-    h.push_str(&carte("Recto-verso", &bloc_recto_verso(&t)));
+    h.push_str(&carte("Couleur et recto-verso", &bloc_modes(&t)));
     h.push_str(&liste_palmares(
         "Services : pages",
         services,
@@ -699,20 +698,22 @@ fn comparaison(t: &Ligne, avant: &Ligne, precedente: &Periode) -> String {
     ))
 }
 
-fn bloc_recto_verso(t: &Ligne) -> String {
+/// Part de la couleur, puis part du recto-verso : deux mesures distinctes, d'où deux couleurs distinctes.
+fn bloc_modes(t: &Ligne) -> String {
     if t.pages <= 0 {
         return note("Aucune page sur cette période.");
     }
     let texte = format!(
-        "{} pages sur {} ({})",
+        "Recto-verso : {} pages sur {} ({})",
         entier(t.recto_verso),
         entier(t.pages),
         pourcentage(t.recto_verso, t.pages)
     );
     format!(
-        "{}<p>{}</p>",
-        barre(t.recto_verso, t.pages, &texte),
-        echapper(&texte)
+        "{}<p class=\"sous-mesure\">{}</p>{}",
+        bloc_repartition(t),
+        echapper(&texte),
+        jauge(t.recto_verso, t.pages, &texte)
     )
 }
 
@@ -1008,8 +1009,7 @@ async fn vue(c: Contexte, s: Session, vue: Vue, valeur: String, d: Demande) -> R
         &bloc_evolution(&tranches),
     ));
     h.push_str("<div class=\"grille\">");
-    h.push_str(&carte("Noir et blanc, couleur", &bloc_repartition(&t)));
-    h.push_str(&carte("Recto-verso", &bloc_recto_verso(&t)));
+    h.push_str(&carte("Couleur et recto-verso", &bloc_modes(&t)));
     h.push_str(&liste_palmares(
         &format!("{} : pages", axe2.titre()),
         &lignes2,
@@ -1260,8 +1260,8 @@ fn libelle(v: &str) -> &str {
         "noir_et_blanc" => "N&B",
         "couleur" => "Couleur",
         "recto" => "Recto",
-        "bord_long" => "Recto-verso, bord long",
-        "bord_court" => "Recto-verso, bord court",
+        "bord_long" => "Bord long",
+        "bord_court" => "Bord court",
         "imprime" => "Imprimé",
         "annule" => "Annulé",
         "erreur" => "Erreur",
@@ -1283,7 +1283,8 @@ async fn detail(
     // Sans date demandée : tout le détail encore conservé.
     let du_conserve = limite_ms(maintenant, i.detail_mois, &i.fuseau)
         .and_then(|ms| Timestamp::from_millisecond(ms).ok())
-        .map(|t| t.to_zoned(i.fuseau.clone()).date().to_string());
+        .and_then(|t| t.to_zoned(i.fuseau.clone()).date().tomorrow().ok())
+        .map(|d| d.to_string());
     let demande = Demande {
         du: d.du.filter(|v| !v.trim().is_empty()).or(du_conserve),
         au: d.au,
@@ -1337,8 +1338,7 @@ async fn detail(
         &bloc_evolution(&tranches),
     ));
     h.push_str("<div class=\"grille\">");
-    h.push_str(&carte("Noir et blanc, couleur", &bloc_repartition(&t)));
-    h.push_str(&carte("Recto-verso", &bloc_recto_verso(&t)));
+    h.push_str(&carte("Couleur et recto-verso", &bloc_modes(&t)));
     h.push_str(&liste_palmares(
         "Copieurs utilisés : pages",
         &par_copieur,
@@ -2109,6 +2109,11 @@ mod tests {
             r.texte
         );
         assert!(r.texte.contains("<svg"));
+        assert!(
+            r.texte.contains("du=2025-11-16&amp;au=2026-11-15\" aria-current"),
+            "par défaut, l'onglet 12 mois : {}",
+            r.texte
+        );
         // Une période sans travail vide aussi la liste.
         let r = b
             .get(
