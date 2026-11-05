@@ -1559,9 +1559,9 @@ async fn copieurs(
     let t = rapports::total(lignes);
     let mut h = i.etat_collecte(&receptions, maintenant);
     h.push_str(&i.a_traiter(&releves, &activite, maintenant, &periode));
+    h.push_str(&tableau_consommables(&releves, &periode));
     h.push_str(&i.selecteur(&periode, "/copieurs", maintenant));
     h.push_str(&i.pages_produites(&mesures, &periode));
-    h.push_str(&tableau_consommables(&releves, &periode));
     h.push_str(&note_sur_le_calcul(&t, non_imprimes, &i.couts().devise));
     h.push_str(&i.avis_conservation(&periode, maintenant));
     h.push_str("<h2>Activité</h2>");
@@ -1668,7 +1668,10 @@ fn tableau_consommables(releves: &[ReleveCopieur], periode: &Periode) -> String 
     });
     let mut colonnes = vec![Colonne::texte("Copieur")];
     colonnes.extend(TONERS.iter().map(|(nom, _)| Colonne::nombre(nom)));
-    colonnes.push(Colonne::texte("Autres"));
+    let avec_autres = lignes.iter().any(|(r, _)| !autres_consommables(r).is_empty());
+    if avec_autres {
+        colonnes.push(Colonne::texte("Autres"));
+    }
     let mut tableau = Tableau::nouveau(&colonnes);
     for (r, niveaux) in lignes {
         let mut cellules = vec![cellule_cle(Axe::Copieur, &r.copieur, periode)];
@@ -1679,11 +1682,13 @@ fn tableau_consommables(releves: &[ReleveCopieur], periode: &Periode) -> String 
             )),
             None => Cellule::Nombre("—".to_owned()),
         }));
-        cellules.push(Cellule::Texte(autres_consommables(r)));
+        if avec_autres {
+            cellules.push(Cellule::Texte(autres_consommables(r)));
+        }
         tableau.ligne(cellules);
     }
     format!(
-        "<h2>Consommables</h2>{}",
+        "<h2>Consommables</h2><div class=\"colonnes-egales\">{}</div>",
         tableau.fin_ou("Aucun relevé reçu : pas de niveau de toner connu.")
     )
 }
@@ -2784,6 +2789,7 @@ mod tests {
         let h = tableau_consommables(&[plein, bas], &periode_essai());
         assert!(h.find(">BAS<").unwrap() < h.find(">PLEIN<").unwrap(), "{h}");
         assert!(!h.contains("Waste"), "{h}");
+        assert!(!h.contains("Autres"), "{h}");
         let mut tambour = releve_seul("T", 0, &[]);
         tambour.consommables = vec![conso("Drum Unit (Black)", 55, 100)];
         assert_eq!(niveaux_toner(&tambour), [None; 4]);

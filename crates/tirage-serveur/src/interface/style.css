@@ -238,3 +238,7 @@ rect.chaleur.n4 { fill-opacity: .78; }
 /* Deux cartes qui se suivent hors d'une grille ne se touchent pas. */
 .carte + .carte { margin-top: 1rem; }
 .grille > .carte + .carte { margin-top: 0; }
+
+.colonnes-egales table {
+  table-layout: fixed;
+}
