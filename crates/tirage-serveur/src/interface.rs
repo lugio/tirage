@@ -2642,7 +2642,10 @@ mod tests {
         let r = b
             .get(&format!("/rapports/utilisateur?{NOVEMBRE}"), Some(&cookie))
             .await;
-        assert!(r.texte.contains("href=\"/utilisateurs/a.exemple?du=2026-11-01&amp;au=2026-11-30\""));
+        assert!(
+            r.texte
+                .contains("href=\"/utilisateurs/a.exemple?du=2026-11-01&amp;au=2026-11-30\"")
+        );
         assert!(
             r.texte.contains("A &lt;b&gt;Exemple"),
             "nom de l'annuaire échappé"
