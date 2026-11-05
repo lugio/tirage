@@ -2,6 +2,7 @@
 
 ## [Non publié]
 ### Ajouté
+- Interface : page Copieurs alimentée par les travaux (activité, personnes, non imprimés, dernier travail), sans attendre le relevé SNMP ; raccourcis de période ; comparaison à la période précédente et feuilles évitées par le recto-verso ; vue d'un service, d'un cabinet ou d'un copieur, journalisée ; fiche d'une personne avec ses totaux, son évolution, ses copieurs, et durée, taille, résolution et orientation de chaque travail.
 - Squelette de l'espace Cargo (modèle, file d'attente, collecteur, serveur), CI, politique de dépendances, ADR 0001-0002.
 - Format d'échange v1 (`tirage-modele`) : travail d'impression, relevé de copieur, enveloppe versionnée, politique du nom de document (non / application / complet) et déduction de l'application d'origine.
 - Collecteur, lecture du spouleur Windows (`tirage-collecteur --console`) : abonnement aux notifications de travaux du serveur d'impression local, réglages du pilote (DEVMODE : copies, couleur, recto-verso, format, orientation, résolution), suivi jusqu'à la sortie de file, dépôt dans la file d'attente. Guide d'essai : `docs/guides/essai-collecteur.md`.

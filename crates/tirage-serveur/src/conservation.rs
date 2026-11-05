@@ -137,7 +137,7 @@ mod tests {
         let b = base.lock().unwrap();
         // Le détail récent reste, le reste a disparu, y compris la fiche de la personne sans travail restant.
         assert_eq!(b.nombre_travaux().unwrap(), 1);
-        assert!(b.travaux_de("parti.exemple", 10).unwrap().is_empty());
+        assert!(b.travaux_de("parti.exemple", 0, i64::MAX, 10).unwrap().is_empty());
         assert_eq!(b.personne("parti.exemple").unwrap(), None);
         assert!(b.personne("reste.exemple").unwrap().is_some());
         assert_eq!(b.consultations(10).unwrap().len(), 1);

@@ -149,6 +149,9 @@ form.periode label { margin: 0; }
 
 /* Tableaux */
 .defile { overflow-x: auto; margin: .5rem 0 1.5rem; }
+/* Le tableau défile : une ligne de tableau reste sur une ligne. Dans une carte, il doit tenir : il passe à la ligne. */
+.defile td, .defile th { white-space: nowrap; }
+.carte .defile td, .carte .defile th { white-space: normal; }
 table {
   width: 100%;
   border-collapse: collapse;
@@ -216,3 +219,7 @@ details .defile { margin-top: .5rem; }
 @media (prefers-reduced-motion: reduce) {
   nav a { transition: none; }
 }
+
+/* Mesure seule : ni une série, ni un classement. */
+rect.jauge { fill: var(--chiffre); }
+.sous-mesure { margin: 1rem 0 .4rem; font-size: .9rem; }

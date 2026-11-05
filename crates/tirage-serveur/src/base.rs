@@ -144,6 +144,48 @@ pub struct LigneTravail {
     pub statut: String,
     pub nom_document: Option<String>,
     pub application: Option<String>,
+    pub imprime_ms: Option<i64>,
+    pub taille_octets: Option<i64>,
+    pub resolution_ppp: Option<i64>,
+    pub orientation: Option<String>,
+}
+
+/// Restreint une lecture à un service, un cabinet, un copieur ou une personne.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Filtre<'a> {
+    Tout,
+    Service(&'a str),
+    Cabinet(&'a str),
+    Copieur(&'a str),
+    Utilisateur(&'a str),
+}
+
+impl<'a> Filtre<'a> {
+    /// Condition SQL, sur `travaux t` joint à `personnes p`, et sa valeur en paramètre `?3`.
+    fn condition(self) -> (&'static str, Option<&'a str>) {
+        match self {
+            Filtre::Tout => ("?3 IS NULL", None),
+            Filtre::Service(v) => (
+                "COALESCE(NULLIF(p.service, ''), 'Non rattaché') = ?3 COLLATE NOCASE",
+                Some(v),
+            ),
+            Filtre::Cabinet(v) => (
+                "COALESCE(NULLIF(p.cabinet, ''), 'Non rattaché') = ?3 COLLATE NOCASE",
+                Some(v),
+            ),
+            Filtre::Copieur(v) => ("t.file = ?3 COLLATE NOCASE", Some(v)),
+            Filtre::Utilisateur(v) => ("t.utilisateur = ?3 COLLATE NOCASE", Some(v)),
+        }
+    }
+}
+
+/// Activité d'un copieur sur une période, tous statuts confondus.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiviteCopieur {
+    pub file: String,
+    pub dernier_ms: i64,
+    pub non_imprimes: i64,
+    pub personnes: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -270,6 +312,18 @@ impl Base {
 
     /// Travaux imprimés de la période `[du_ms, au_ms[`, regroupés selon l'axe.
     pub fn agreger(&self, axe: Axe, du_ms: i64, au_ms: i64) -> rusqlite::Result<Vec<LigneBrute>> {
+        self.agreger_filtre(axe, du_ms, au_ms, Filtre::Tout)
+    }
+
+    /// Comme `agreger`, restreint par `filtre`.
+    pub fn agreger_filtre(
+        &self,
+        axe: Axe,
+        du_ms: i64,
+        au_ms: i64,
+        filtre: Filtre<'_>,
+    ) -> rusqlite::Result<Vec<LigneBrute>> {
+        let (condition, valeur) = filtre.condition();
         let cle = match axe {
             Axe::Utilisateur => "t.utilisateur",
             Axe::Service => "COALESCE(NULLIF(p.service, ''), 'Non rattaché')",
@@ -280,11 +334,11 @@ impl Base {
         let sql = format!(
             "SELECT {cle}, max(p.nom), t.file, t.couleur, t.recto_verso, count(*), sum(t.pages_totales), sum(t.feuilles)
              FROM travaux t LEFT JOIN personnes p ON t.utilisateur = p.utilisateur COLLATE NOCASE
-             WHERE t.envoye_ms >= ?1 AND t.envoye_ms < ?2 AND t.statut = 'imprime'
+             WHERE t.envoye_ms >= ?1 AND t.envoye_ms < ?2 AND t.statut = 'imprime' AND {condition}
              GROUP BY 1, 3, 4, 5"
         );
         let mut s = self.conn.prepare(&sql)?;
-        s.query_map([du_ms, au_ms], |r| {
+        s.query_map(params![du_ms, au_ms, valeur], |r| {
             Ok(LigneBrute {
                 cle: r.get(0)?,
                 nom: if axe == Axe::Utilisateur { r.get(1)? } else { None },
@@ -302,12 +356,45 @@ impl Base {
     /// Pages imprimées de `[du_ms, au_ms[` par quart d'heure et mode couleur : l'appelant les range dans son fuseau, ce
     /// que SQLite ne sait pas faire aux changements d'heure.
     pub fn pages_dans_le_temps(&self, du_ms: i64, au_ms: i64) -> rusqlite::Result<Vec<(i64, String, i64)>> {
+        self.pages_dans_le_temps_filtre(du_ms, au_ms, Filtre::Tout)
+    }
+
+    /// Comme `pages_dans_le_temps`, restreint par `filtre`.
+    pub fn pages_dans_le_temps_filtre(
+        &self,
+        du_ms: i64,
+        au_ms: i64,
+        filtre: Filtre<'_>,
+    ) -> rusqlite::Result<Vec<(i64, String, i64)>> {
+        let (condition, valeur) = filtre.condition();
+        let mut s = self.conn.prepare(&format!(
+            "SELECT t.envoye_ms / 900000 * 900000, t.couleur, sum(t.pages_totales)
+             FROM travaux t LEFT JOIN personnes p ON t.utilisateur = p.utilisateur COLLATE NOCASE
+             WHERE t.envoye_ms >= ?1 AND t.envoye_ms < ?2 AND t.statut = 'imprime' AND {condition}
+             GROUP BY 1, 2"
+        ))?;
+        s.query_map(params![du_ms, au_ms, valeur], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })?
+        .collect()
+    }
+
+    /// Dernier travail, travaux non imprimés et nombre de personnes de chaque copieur, sur `[du_ms, au_ms[`.
+    pub fn activite_copieurs(&self, du_ms: i64, au_ms: i64) -> rusqlite::Result<Vec<ActiviteCopieur>> {
         let mut s = self.conn.prepare(
-            "SELECT envoye_ms / ?3 * ?3, couleur, sum(pages_totales) FROM travaux
-             WHERE envoye_ms >= ?1 AND envoye_ms < ?2 AND statut = 'imprime' GROUP BY 1, 2",
+            "SELECT file, max(envoye_ms), sum(statut <> 'imprime'), count(DISTINCT utilisateur COLLATE NOCASE)
+             FROM travaux WHERE envoye_ms >= ?1 AND envoye_ms < ?2
+             GROUP BY file COLLATE NOCASE ORDER BY file",
         )?;
-        s.query_map([du_ms, au_ms, 900_000], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
-            .collect()
+        s.query_map([du_ms, au_ms], |r| {
+            Ok(ActiviteCopieur {
+                file: r.get(0)?,
+                dernier_ms: r.get(1)?,
+                non_imprimes: r.get(2)?,
+                personnes: r.get(3)?,
+            })
+        })?
+        .collect()
     }
 
     /// Pages archivées des mois `[premier, dernier]` (« AAAA-MM »), par mois et mode couleur.
@@ -532,14 +619,21 @@ impl Base {
         .collect()
     }
 
-    /// Derniers travaux d'un utilisateur, le plus récent d'abord.
-    pub fn travaux_de(&self, utilisateur: &str, max: u32) -> rusqlite::Result<Vec<LigneTravail>> {
+    /// Derniers travaux d'un utilisateur sur `[du_ms, au_ms[`, le plus récent d'abord.
+    pub fn travaux_de(
+        &self,
+        utilisateur: &str,
+        du_ms: i64,
+        au_ms: i64,
+        max: u32,
+    ) -> rusqlite::Result<Vec<LigneTravail>> {
         let mut s = self.conn.prepare(
             "SELECT envoye_ms, file, poste, pages, copies, feuilles, couleur, recto_verso, format, statut,
-                nom_document, application
-             FROM travaux WHERE utilisateur = ?1 COLLATE NOCASE ORDER BY envoye_ms DESC LIMIT ?2",
+                nom_document, application, imprime_ms, taille_octets, resolution_ppp, orientation
+             FROM travaux WHERE utilisateur = ?1 COLLATE NOCASE AND envoye_ms >= ?2 AND envoye_ms < ?3
+             ORDER BY envoye_ms DESC LIMIT ?4",
         )?;
-        s.query_map(params![utilisateur, max], |r| {
+        s.query_map(params![utilisateur, du_ms, au_ms, max], |r| {
             Ok(LigneTravail {
                 envoye_ms: r.get(0)?,
                 file: r.get(1)?,
@@ -553,6 +647,10 @@ impl Base {
                 statut: r.get(9)?,
                 nom_document: r.get(10)?,
                 application: r.get(11)?,
+                imprime_ms: r.get(12)?,
+                taille_octets: r.get(13)?,
+                resolution_ppp: r.get(14)?,
+                orientation: r.get(15)?,
             })
         })?
         .collect()
@@ -731,10 +829,78 @@ pub(crate) mod tests {
         let mut autre = travail(3);
         autre.utilisateur = "b.exemple".into();
         b.enregistrer(&Evenement::Travail(autre), 0).unwrap();
-        let l = b.travaux_de("A.EXEMPLE", 10).unwrap();
+        let l = b.travaux_de("A.EXEMPLE", 0, i64::MAX, 10).unwrap();
         assert_eq!(l.len(), 2);
         assert!(l[0].envoye_ms > l[1].envoye_ms);
-        assert_eq!(b.travaux_de("a.exemple", 1).unwrap().len(), 1);
+        assert_eq!(b.travaux_de("a.exemple", 0, i64::MAX, 1).unwrap().len(), 1);
+        // La fin de la période est exclue.
+        let dernier = l[0].envoye_ms;
+        let avant = b.travaux_de("a.exemple", 0, dernier, 10).unwrap();
+        assert_eq!(avant.len(), 1);
+        assert_eq!(avant[0].envoye_ms, l[1].envoye_ms);
+    }
+
+    #[test]
+    fn un_filtre_ne_rend_que_ce_qu_il_vise() {
+        let mut b = Base::en_memoire().unwrap();
+        let mut ajouter = |n: u32, u: &str, f: &str| {
+            let mut t = travail(n);
+            t.utilisateur = u.into();
+            t.file = f.into();
+            b.enregistrer(&Evenement::Travail(t), 0).unwrap();
+        };
+        ajouter(1, "a.exemple", "COPIEUR-1");
+        ajouter(2, "b.exemple", "COPIEUR-1");
+        ajouter(3, "c.exemple", "COPIEUR-2");
+        b.personne_trouvee("a.exemple", None, Some("Audit"), Some("Est"), 0)
+            .unwrap();
+        b.personne_trouvee("b.exemple", None, Some("Paie"), Some("Est"), 0)
+            .unwrap();
+        let cles = |f| -> Vec<String> {
+            let mut v: Vec<String> = b
+                .agreger_filtre(Axe::Utilisateur, 0, i64::MAX, f)
+                .unwrap()
+                .into_iter()
+                .map(|l| l.cle)
+                .collect();
+            v.sort();
+            v
+        };
+        assert_eq!(cles(Filtre::Tout).len(), 3);
+        assert_eq!(cles(Filtre::Service("AUDIT")), ["a.exemple"]);
+        assert_eq!(cles(Filtre::Service("Non rattaché")), ["c.exemple"]);
+        assert_eq!(cles(Filtre::Cabinet("Est")), ["a.exemple", "b.exemple"]);
+        assert_eq!(cles(Filtre::Copieur("copieur-2")), ["c.exemple"]);
+        assert_eq!(cles(Filtre::Utilisateur("B.EXEMPLE")), ["b.exemple"]);
+        assert!(
+            cles(Filtre::Service("' OR 1=1 --")).is_empty(),
+            "valeur en paramètre"
+        );
+        let temps = b
+            .pages_dans_le_temps_filtre(0, i64::MAX, Filtre::Copieur("COPIEUR-2"))
+            .unwrap();
+        let tout = b.pages_dans_le_temps(0, i64::MAX).unwrap();
+        let somme = |v: &[(i64, String, i64)]| v.iter().map(|l| l.2).sum::<i64>();
+        assert!(somme(&temps) > 0 && somme(&temps) < somme(&tout));
+    }
+
+    #[test]
+    fn activite_des_copieurs_tous_statuts() {
+        let mut b = Base::en_memoire().unwrap();
+        let mut ajouter = |n: u32, u: &str, statut, ms: i64| {
+            let mut t = travail(n);
+            t.utilisateur = u.into();
+            t.statut = statut;
+            t.envoye_ms = ms;
+            b.enregistrer(&Evenement::Travail(t), 0).unwrap();
+        };
+        ajouter(1, "a.exemple", Statut::Imprime, 10);
+        ajouter(2, "A.EXEMPLE", Statut::Erreur, 30);
+        ajouter(3, "b.exemple", Statut::Annule, 20);
+        let a = b.activite_copieurs(0, 100).unwrap();
+        assert_eq!(a.len(), 1);
+        assert_eq!((a[0].dernier_ms, a[0].non_imprimes, a[0].personnes), (30, 2, 2));
+        assert!(b.activite_copieurs(0, 10).unwrap().is_empty());
     }
 
     #[test]

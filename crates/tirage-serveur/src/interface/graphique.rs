@@ -230,6 +230,11 @@ pub fn barre(valeur: i64, max: i64, libelle: &str) -> String {
     )
 }
 
+/// Part d'un tout pour une seule mesure, dans une couleur qui n'est celle d'aucune série.
+pub fn jauge(valeur: i64, max: i64, libelle: &str) -> String {
+    barre(valeur, max, libelle).replace("class=\"noir\"", "class=\"jauge\"")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,6 +324,16 @@ mod tests {
             }
         }
         assert!(h.matches("axe milieu").count() <= ETIQUETTES_MAX);
+    }
+
+    #[test]
+    fn une_jauge_n_emprunte_pas_la_couleur_d_une_serie() {
+        let h = jauge(1, 2, "d");
+        assert!(
+            h.contains("class=\"jauge\"") && !h.contains("class=\"noir\""),
+            "{h}"
+        );
+        assert!(h.contains("width=\"50.000%\""), "{h}");
     }
 
     #[test]
