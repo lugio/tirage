@@ -686,6 +686,47 @@ impl Base {
             .collect())
     }
 
+    /// Pages produites par un copieur entre relevés successifs, sous la forme (instant, mode, pages) des courbes.
+    /// Une baisse de compteur (appareil changé) ne produit rien et sert de nouveau point de départ.
+    pub fn ecarts_compteurs(
+        &self,
+        copieur: &str,
+        du_ms: i64,
+        au_ms: i64,
+    ) -> rusqlite::Result<Vec<(i64, String, i64)>> {
+        let mut s = self.conn.prepare(
+            "SELECT releve_ms, json_extract(contenu, '$.compteur_noir'), json_extract(contenu, '$.compteur_couleur')
+             FROM releves
+             WHERE copieur = ?1 COLLATE NOCASE AND releve_ms < ?3
+               AND releve_ms >= COALESCE(
+                   (SELECT max(releve_ms) FROM releves WHERE copieur = ?1 COLLATE NOCASE AND releve_ms <= ?2), ?2)
+             ORDER BY releve_ms",
+        )?;
+        let lignes = s.query_map(params![copieur, du_ms, au_ms], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, Option<i64>>(1)?,
+                r.get::<_, Option<i64>>(2)?,
+            ))
+        })?;
+        let mut sortie = Vec::new();
+        let (mut noir, mut couleur) = (None, None);
+        for l in lignes {
+            let (ms, n, c) = l?;
+            for (avant, actuel, mode) in [(&mut noir, n, "noir_et_blanc"), (&mut couleur, c, "couleur")] {
+                if let (Some(a), Some(v)) = (*avant, actuel)
+                    && v > a
+                {
+                    sortie.push((ms, mode.to_owned(), v - a));
+                }
+                if actuel.is_some() {
+                    *avant = actuel;
+                }
+            }
+        }
+        Ok(sortie)
+    }
+
     /// Utilisateurs vus dans les travaux, sans fiche ou dont la fiche date d'avant `avant_ms`.
     pub fn utilisateurs_a_verifier(&self, avant_ms: i64) -> rusqlite::Result<Vec<String>> {
         let mut s = self.conn.prepare(
@@ -1271,6 +1312,27 @@ pub(crate) mod tests {
         let l = b.compteurs_periode(100, 200).unwrap();
         assert!(l[0].remis_a_zero);
         assert_eq!((l[0].total, l[0].noir, l[0].couleur), (None, Some(10), None));
+    }
+
+    #[test]
+    fn ecarts_compteurs_par_releve() {
+        let mut b = Base::en_memoire().unwrap();
+        enregistrer_releve(&mut b, "C1", 50, 100, 80, Some(20));
+        enregistrer_releve(&mut b, "C1", 150, 130, 100, Some(30));
+        enregistrer_releve(&mut b, "c1", 160, 130, 100, None);
+        enregistrer_releve(&mut b, "C1", 170, 10, 5, Some(35));
+        enregistrer_releve(&mut b, "C1", 180, 20, 12, Some(35));
+        enregistrer_releve(&mut b, "C2", 150, 999, 999, Some(999));
+        assert_eq!(
+            b.ecarts_compteurs("C1", 100, 200).unwrap(),
+            [
+                (150, "noir_et_blanc".to_owned(), 20),
+                (150, "couleur".to_owned(), 10),
+                (170, "couleur".to_owned(), 5),
+                (180, "noir_et_blanc".to_owned(), 7),
+            ]
+        );
+        assert!(b.ecarts_compteurs("C3", 100, 200).unwrap().is_empty());
     }
 
     #[test]

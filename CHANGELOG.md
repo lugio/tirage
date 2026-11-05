@@ -2,6 +2,7 @@
 
 ## [Non publié]
 ### Ajouté
+- Interface : résumé des copieurs sur l'accueil, tableau des consommables du toner le plus bas au plus haut, fiche d'un copieur avec son relevé, ses problèmes, ses consommables et ses pages produites dans le temps.
 - Interface, page Copieurs : pages réellement produites sur la période d'après les compteurs, copies comprises ; bloc « À traiter » avec copieur muet en heures ouvrées et alertes traduites, classées par gravité, sans la veille.
 - Collecteur : relevé automatique des copieurs déclarés (`[snmp] intervalle_minutes`, 60 par défaut), envoyé par la file ; profil Konica Minolta avec compteurs noir et couleur, copie et impression, y compris sur un appareil sans fonction copie.
 - Interface : page Tarifs, prix par page N&B et couleur, général ou par copieur, gardés en base, inscrits au journal ; ils priment sur `[couts]`.
