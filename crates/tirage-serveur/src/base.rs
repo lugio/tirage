@@ -198,6 +198,20 @@ pub struct ActiviteCopieur {
     pub gros_pages: i64,
 }
 
+/// Pages produites par un copieur sur une période, d'après ses compteurs : copies comprises.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompteursPeriode {
+    pub copieur: String,
+    /// Relevés comparés : le début peut précéder la période (dernier relevé connu) ou la suivre (premier relevé).
+    pub debut_ms: i64,
+    pub fin_ms: i64,
+    pub total: Option<i64>,
+    pub noir: Option<i64>,
+    pub couleur: Option<i64>,
+    /// Un compteur a reculé (carte remplacée, appareil changé) : la différence n'a plus de sens.
+    pub remis_a_zero: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Issue {
     Nouveau,
@@ -620,6 +634,55 @@ impl Base {
         Ok(contenus
             .iter()
             .filter_map(|c| serde_json::from_str(c).ok())
+            .collect())
+    }
+
+    /// Pages produites par chaque copieur sur `[du_ms, au_ms[` : différence entre le dernier relevé connu au début
+    /// de la période (à défaut le premier de la période) et le dernier de la période. Il faut deux relevés.
+    pub fn compteurs_periode(&self, du_ms: i64, au_ms: i64) -> rusqlite::Result<Vec<CompteursPeriode>> {
+        let mut s = self.conn.prepare(
+            "WITH bornes AS (
+                SELECT collecteur, copieur, max(releve_ms) AS fin,
+                    COALESCE((SELECT max(x.releve_ms) FROM releves x
+                              WHERE x.collecteur = r.collecteur AND x.copieur = r.copieur AND x.releve_ms <= ?1),
+                             min(releve_ms)) AS debut
+                FROM releves r WHERE releve_ms >= ?1 AND releve_ms < ?2
+                GROUP BY collecteur, copieur
+             )
+             SELECT d.contenu, f.contenu FROM bornes b
+             JOIN releves d ON d.collecteur = b.collecteur AND d.copieur = b.copieur AND d.releve_ms = b.debut
+             JOIN releves f ON f.collecteur = b.collecteur AND f.copieur = b.copieur AND f.releve_ms = b.fin
+             WHERE b.debut < b.fin ORDER BY b.copieur",
+        )?;
+        let paires: Vec<(String, String)> = s
+            .query_map([du_ms, au_ms], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        Ok(paires
+            .iter()
+            .filter_map(|(d, f)| {
+                let d: ReleveCopieur = serde_json::from_str(d).ok()?;
+                let f: ReleveCopieur = serde_json::from_str(f).ok()?;
+                let mut remis_a_zero = false;
+                let mut ecart = |a: Option<u64>, b: Option<u64>| {
+                    let (a, b) = (i64::try_from(a?).ok()?, i64::try_from(b?).ok()?);
+                    remis_a_zero |= b < a;
+                    (b >= a).then_some(b - a)
+                };
+                let (total, noir, couleur) = (
+                    ecart(d.compteur_total, f.compteur_total),
+                    ecart(d.compteur_noir, f.compteur_noir),
+                    ecart(d.compteur_couleur, f.compteur_couleur),
+                );
+                Some(CompteursPeriode {
+                    copieur: f.copieur,
+                    debut_ms: d.releve_ms,
+                    fin_ms: f.releve_ms,
+                    total,
+                    noir,
+                    couleur,
+                    remis_a_zero,
+                })
+            })
             .collect())
     }
 
@@ -1148,6 +1211,66 @@ pub(crate) mod tests {
         let debut = travail(1).envoye_ms;
         assert!(b.agreger(Axe::Copieur, 0, debut).unwrap().is_empty());
         assert_eq!(b.agreger(Axe::Copieur, debut, debut + 1).unwrap()[0].travaux, 1);
+    }
+
+    fn enregistrer_releve(b: &mut Base, copieur: &str, ms: i64, total: u64, noir: u64, couleur: Option<u64>) {
+        let r = Evenement::Releve(ReleveCopieur {
+            collecteur: "impression-1".into(),
+            copieur: copieur.into(),
+            releve_ms: ms,
+            modele: None,
+            numero_serie: None,
+            compteur_total: Some(total),
+            compteur_noir: Some(noir),
+            compteur_couleur: couleur,
+            consommables: vec![],
+            etat: None,
+            alertes: vec![],
+        });
+        b.enregistrer(&r, 0).unwrap();
+    }
+
+    #[test]
+    fn compteurs_periode_part_du_dernier_releve_connu() {
+        let mut b = Base::en_memoire().unwrap();
+        enregistrer_releve(&mut b, "C1", 50, 100, 80, Some(20));
+        enregistrer_releve(&mut b, "C1", 150, 130, 100, Some(30));
+        enregistrer_releve(&mut b, "C1", 180, 160, 120, Some(40));
+        enregistrer_releve(&mut b, "C1", 250, 999, 999, Some(99));
+        let l = b.compteurs_periode(100, 200).unwrap();
+        assert_eq!(l.len(), 1);
+        assert_eq!((l[0].debut_ms, l[0].fin_ms), (50, 180));
+        assert_eq!(
+            (l[0].total, l[0].noir, l[0].couleur),
+            (Some(60), Some(40), Some(20))
+        );
+        assert!(!l[0].remis_a_zero);
+    }
+
+    #[test]
+    fn compteurs_periode_sans_releve_avant_part_du_premier() {
+        let mut b = Base::en_memoire().unwrap();
+        enregistrer_releve(&mut b, "C1", 120, 100, 80, Some(20));
+        enregistrer_releve(&mut b, "C1", 150, 110, 85, Some(25));
+        let l = b.compteurs_periode(100, 200).unwrap();
+        assert_eq!((l[0].debut_ms, l[0].total), (120, Some(10)));
+    }
+
+    #[test]
+    fn compteurs_periode_un_seul_releve_ne_mesure_rien() {
+        let mut b = Base::en_memoire().unwrap();
+        enregistrer_releve(&mut b, "C1", 120, 100, 80, Some(20));
+        assert!(b.compteurs_periode(100, 200).unwrap().is_empty());
+    }
+
+    #[test]
+    fn compteurs_periode_compteur_recule_ou_absent() {
+        let mut b = Base::en_memoire().unwrap();
+        enregistrer_releve(&mut b, "C1", 120, 100, 80, None);
+        enregistrer_releve(&mut b, "C1", 150, 10, 90, Some(5));
+        let l = b.compteurs_periode(100, 200).unwrap();
+        assert!(l[0].remis_a_zero);
+        assert_eq!((l[0].total, l[0].noir, l[0].couleur), (None, Some(10), None));
     }
 
     #[test]
