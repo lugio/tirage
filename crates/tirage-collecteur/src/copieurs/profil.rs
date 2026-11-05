@@ -39,6 +39,10 @@ pub struct Compteurs<T> {
     pub noir: Vec<T>,
     #[serde(default = "Vec::new")]
     pub couleur: Vec<T>,
+    /// Compte pour zéro un OID absent ou négatif : selon le modèle, une fonction n'existe pas (copie sur une
+    /// imprimante). Le compteur reste non publié si aucun OID ne répond.
+    #[serde(default)]
+    pub absents_toleres: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -68,6 +72,7 @@ impl Profil {
                 total: conv(&f.compteurs.total)?,
                 noir: conv(&f.compteurs.noir)?,
                 couleur: conv(&f.compteurs.couleur)?,
+                absents_toleres: f.compteurs.absents_toleres,
             },
         })
     }

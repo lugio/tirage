@@ -1,5 +1,6 @@
 //! Relevé des copieurs par SNMP (lecture seule).
 
+pub mod periodique;
 pub mod profil;
 pub mod releve;
 

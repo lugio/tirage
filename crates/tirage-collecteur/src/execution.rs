@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use tirage_modele::PolitiqueNomDocument;
 
-use crate::config::{Config, Serveur};
+use crate::config::{Config, Copieur, Serveur, Snmp};
 
 /// Événements gardés au plus dans la file (serveur injoignable longtemps).
 pub const CAPACITE: usize = 100_000;
@@ -17,6 +17,8 @@ pub struct Reglages {
     pub collecteur: String,
     pub politique: PolitiqueNomDocument,
     pub serveur: Option<Serveur>,
+    pub snmp: Snmp,
+    pub copieurs: Vec<Copieur>,
 }
 
 impl Reglages {
@@ -26,6 +28,8 @@ impl Reglages {
             collecteur: c.collecteur,
             politique: c.nom_document,
             serveur: c.serveur,
+            snmp: c.snmp,
+            copieurs: c.copieurs,
         }
     }
 
@@ -40,13 +44,14 @@ pub use windows::executer;
 
 #[cfg(windows)]
 mod windows {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
 
     use tirage_file::{ErreurFile, FileAttente};
     use tirage_modele::{Enveloppe, Evenement};
 
     use super::{CAPACITE, Reglages};
+    use crate::copieurs::periodique;
     use crate::envoi;
     use crate::journal::Journal;
     use crate::spouleur;
@@ -58,13 +63,15 @@ mod windows {
         journal: &Arc<Journal>,
         afficher: bool,
     ) -> Result<(), String> {
-        let mut file = FileAttente::ouvrir(&r.donnees, CAPACITE).map_err(|e| e.to_string())?;
+        let file = FileAttente::ouvrir(&r.donnees, CAPACITE).map_err(|e| e.to_string())?;
         journal.ecrire(&format!(
             "démarrage {} — collecteur « {} », file : {} élément(s) en attente",
             env!("CARGO_PKG_VERSION"),
             r.collecteur,
             file.longueur()
         ));
+        // La surveillance du spouleur et les relevés déposent dans la même file.
+        let file = Arc::new(Mutex::new(file));
         let envoi = match &r.serveur {
             Some(s) => {
                 let mut http = envoi::Http::nouveau(s)?;
@@ -89,6 +96,34 @@ mod windows {
                 None
             }
         };
+        let releves = (!r.copieurs.is_empty()).then(|| {
+            journal.ecrire(&format!(
+                "relevés SNMP : {} copieur(s), toutes les {} min",
+                r.copieurs.len(),
+                r.snmp.intervalle().as_secs() / 60
+            ));
+            let (reglages, arret, j, f) = (
+                r.clone(),
+                Arc::clone(arret),
+                Arc::clone(journal),
+                Arc::clone(&file),
+            );
+            std::thread::spawn(move || {
+                periodique::boucle(
+                    &reglages.collecteur,
+                    &reglages.snmp,
+                    &reglages.copieurs,
+                    &arret,
+                    |octets| {
+                        let mut file = f.lock().unwrap_or_else(|e| e.into_inner());
+                        if let Err(e) = file.deposer(octets) {
+                            j.ecrire(&format!("relevé non déposé : {e}"));
+                        }
+                    },
+                    |m| j.ecrire(&format!("relevés : {m}")),
+                );
+            })
+        });
         let mut pleine_signalee = false;
         let res = spouleur::windows::surveiller(arret, |suivi| {
             for brut in suivi.prendre_termines() {
@@ -103,7 +138,7 @@ mod windows {
                 if afficher {
                     println!("{}", String::from_utf8_lossy(&octets));
                 }
-                match file.deposer(&octets) {
+                match file.lock().unwrap_or_else(|e| e.into_inner()).deposer(&octets) {
                     Ok(_) => pleine_signalee = false,
                     Err(ErreurFile::Pleine { capacite }) => {
                         // Une seule ligne par épisode : la collecte continue, le travail est perdu.
@@ -117,7 +152,7 @@ mod windows {
             }
         });
         arret.store(true, Ordering::Relaxed);
-        if let Some(fil) = envoi {
+        for fil in [envoi, releves].into_iter().flatten() {
             let _ = fil.join();
         }
         match res {

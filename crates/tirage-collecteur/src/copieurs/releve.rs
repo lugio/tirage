@@ -85,18 +85,28 @@ fn colonne<T: Transport>(c: &mut Client<T>, base: &str) -> Result<BTreeMap<Vec<u
 }
 
 /// Somme des OID d'un compteur ; `None` si la liste est vide ou si un seul manque (pas de total partiel).
-fn somme<T: Transport>(c: &mut Client<T>, liste: &[Oid]) -> Result<Option<u64>, ErreurSnmp> {
+/// Avec `absents_toleres`, un OID absent ou négatif compte pour zéro, et `None` seulement si aucun ne répond.
+fn somme<T: Transport>(
+    c: &mut Client<T>,
+    liste: &[Oid],
+    absents_toleres: bool,
+) -> Result<Option<u64>, ErreurSnmp> {
     if liste.is_empty() {
         return Ok(None);
     }
     let mut total: u64 = 0;
+    let mut trouve = false;
     for (_, v) in c.get(liste)? {
         match v.nombre().and_then(|n| u64::try_from(n).ok()) {
-            Some(n) => total = total.saturating_add(n),
+            Some(n) => {
+                total = total.saturating_add(n);
+                trouve = true;
+            }
+            None if absents_toleres => {}
             None => return Ok(None),
         }
     }
-    Ok(Some(total))
+    Ok(trouve.then_some(total))
 }
 
 /// Ce qu'un relevé a utilisé, pour l'affichage d'essai.
@@ -141,9 +151,10 @@ pub fn relever<T: Transport>(
     } else {
         &profil.compteurs.total
     };
-    let compteur_total = somme(c, total_oids)?;
-    let compteur_noir = somme(c, &profil.compteurs.noir)?;
-    let compteur_couleur = somme(c, &profil.compteurs.couleur)?;
+    let tolere = profil.compteurs.absents_toleres;
+    let compteur_total = somme(c, total_oids, false)?;
+    let compteur_noir = somme(c, &profil.compteurs.noir, tolere)?;
+    let compteur_couleur = somme(c, &profil.compteurs.couleur, tolere)?;
 
     let descriptions = colonne(c, oids::PRT_CONSO_DESCRIPTION)?;
     let capacites = colonne(c, oids::PRT_CONSO_CAPACITE)?;
@@ -294,6 +305,44 @@ mod tests {
         assert_eq!(ctx.profil, "konica-minolta");
         assert_eq!(r.compteur_total, Some(123_456));
         assert_eq!(r.compteur_noir, None);
+    }
+
+    const NOIR_COPIE: &str = "1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.1.1";
+    const NOIR_IMPRESSION: &str = "1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.1.2";
+    const COULEUR_COPIE: &str = "1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.2.1";
+    const COULEUR_IMPRESSION: &str = "1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.2.2";
+    const UNE_COULEUR_IMPRESSION: &str = "1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.3.2";
+    const DEUX_COULEURS_IMPRESSION: &str = "1.3.6.1.4.1.18334.1.1.1.5.7.2.2.1.5.4.2";
+
+    fn konica() -> FauxAgent {
+        copieur().avec(
+            oids::SYS_OBJECT_ID,
+            Valeur::Oid("1.3.6.1.4.1.18334.1.1".parse().unwrap()),
+        )
+    }
+
+    #[test]
+    fn konica_multifonction_additionne_copie_et_impression() {
+        let mut a = konica()
+            .avec(NOIR_COPIE, Valeur::Entier(10))
+            .avec(NOIR_IMPRESSION, Valeur::Entier(200))
+            .avec(COULEUR_COPIE, Valeur::Entier(3))
+            .avec(COULEUR_IMPRESSION, Valeur::Entier(40))
+            .avec(UNE_COULEUR_IMPRESSION, Valeur::Entier(-1))
+            .avec(DEUX_COULEURS_IMPRESSION, Valeur::Entier(5));
+        let mut c = Client::nouveau(&mut a, b"exemple");
+        let (r, _) = relever(&mut c, "c", "X", &Profils::charger(None).unwrap(), None, 0).unwrap();
+        assert_eq!((r.compteur_noir, r.compteur_couleur), (Some(210), Some(48)));
+    }
+
+    #[test]
+    fn konica_sans_fonction_copie_garde_ses_compteurs() {
+        let mut a = konica()
+            .avec(NOIR_IMPRESSION, Valeur::Entier(232))
+            .avec(COULEUR_IMPRESSION, Valeur::Entier(36));
+        let mut c = Client::nouveau(&mut a, b"exemple");
+        let (r, _) = relever(&mut c, "c", "X", &Profils::charger(None).unwrap(), None, 0).unwrap();
+        assert_eq!((r.compteur_noir, r.compteur_couleur), (Some(232), Some(36)));
     }
 
     #[test]

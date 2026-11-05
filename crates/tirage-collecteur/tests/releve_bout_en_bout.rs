@@ -50,8 +50,8 @@ fn config(dossier: &std::path::Path, adresse: &str) -> std::path::PathBuf {
 
 #[test]
 fn releve_par_l_executable() {
-    // Requêtes du relevé : ident (1) + 2 premières (2) + total (1) + 3 colonnes (2+2+2) + état (1) + erreurs (1) + alertes (1).
-    let (adresse, fil) = faux_copieur(13);
+    // Requêtes du relevé : ident (1) + 2 premières (2) + total (1) + noir (1) + couleur (1) + 3 colonnes (2+2+2) + état (1) + erreurs (1) + alertes (1).
+    let (adresse, fil) = faux_copieur(15);
     let d = tempfile::tempdir().unwrap();
     let sortie = Command::new(env!("CARGO_BIN_EXE_tirage-collecteur"))
         .args(["--releve", "--config"])

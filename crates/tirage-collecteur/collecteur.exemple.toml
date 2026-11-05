@@ -15,6 +15,8 @@ jeton = "jeton-exemple-a-remplacer"
 [snmp]
 delai_ms = 2000
 essais = 2
+# Temps entre deux relevés des copieurs déclarés plus bas (5 à 1440 minutes).
+intervalle_minutes = 60
 # Dossier de profils supplémentaires (*.toml) ; ceux fournis avec l'outil sont intégrés.
 # dossier_profils = 'C:\ProgramData\tirage\profils'
 
