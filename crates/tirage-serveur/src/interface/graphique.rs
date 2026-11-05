@@ -288,9 +288,9 @@ pub fn chaleur(
     Some(h)
 }
 
-/// Niveau à surveiller : même barre, teinte d'alerte. Le chiffre voisin dit la même chose sans la couleur.
-pub fn barre_basse(valeur: i64, max: i64, libelle: &str) -> String {
-    barre(valeur, max, libelle).replace("class=\"jauge\"", "class=\"jauge basse\"")
+/// Barre dans une teinte propre à ce qu'elle mesure (classe de `style.css`). Le chiffre voisin dit la même chose.
+pub fn barre_teintee(valeur: i64, max: i64, libelle: &str, classe: &str) -> String {
+    barre(valeur, max, libelle).replace("class=\"jauge\"", &format!("class=\"jauge {classe}\""))
 }
 
 #[cfg(test)]
@@ -426,7 +426,7 @@ mod tests {
 
     #[test]
     fn une_barre_n_emprunte_pas_la_couleur_d_une_serie() {
-        assert!(barre_basse(1, 2, "d").contains("class=\"jauge basse\""));
+        assert!(barre_teintee(1, 2, "d", "t").contains("class=\"jauge t\""));
         let h = barre(1, 2, "d");
         assert!(
             h.contains("class=\"jauge\"") && !h.contains("class=\"noir\""),

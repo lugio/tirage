@@ -18,6 +18,10 @@
   --erreur: #a00000;
   --fond-erreur: #fdf0f0;
   --bord-erreur: #f0c8c8;
+  --toner-noir: #23282c;
+  --toner-cyan: #00a0dc;
+  --toner-magenta: #d6007f;
+  --toner-jaune: #f0c400;
   --attention: #6f4a00;
   --fond-attention: #fdf4dc;
   --bord-attention: #eeda9f;
@@ -44,6 +48,10 @@
     --erreur: #ffb4b4;
     --fond-erreur: #3a1f1f;
     --bord-erreur: #5c2f2f;
+    /* Un noir franc disparaîtrait sur le fond sombre. */
+    --toner-noir: #aab4ba;
+    --toner-cyan: #22b4e8;
+    --toner-magenta: #ec3f9f;
     --attention: #f2cf85;
     --fond-attention: #3a2f14;
     --bord-attention: #5c4a1f;
@@ -267,7 +275,12 @@ rect.chaleur.n4 { fill-opacity: .78; }
 .colonnes-egales table { table-layout: fixed; min-width: 34rem; }
 .colonnes-egales th:first-child { width: 24%; }
 .colonnes-egales td { white-space: normal; overflow-wrap: anywhere; }
-rect.jauge.basse { fill: var(--erreur); }
+/* Chaque jauge a la couleur de son toner ; un niveau bas se lit au pourcentage, qui ressort. */
+rect.jauge.toner-noir { fill: var(--toner-noir); }
+rect.jauge.toner-cyan { fill: var(--toner-cyan); }
+rect.jauge.toner-magenta { fill: var(--toner-magenta); }
+rect.jauge.toner-jaune { fill: var(--toner-jaune); }
+.toner-bas { color: var(--erreur); }
 
 /* Niveau d'un problème : le mot le dit, la teinte aide à le repérer. */
 .badge { display: inline-block; padding: .05rem .45rem; font-size: .8rem; font-weight: 600; border: 1px solid; border-radius: 4px; }

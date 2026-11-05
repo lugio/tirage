@@ -2,6 +2,7 @@
 
 ## [Non publié]
 ### Modifié
+- Consommables : chaque jauge a la couleur de son toner, le pourcentage d'un toner bas ressort, titres de colonnes alignés sur les jauges.
 - Interface, à la suite d'un audit : rubrique Rapports dans la navigation, classements cliquables sur la période choisie, journal en français, niveaux et toners bas repérables d'un coup d'œil, intitulés et noms longs qui passent à la ligne, barres de classement dans une teinte distincte des séries N&B et couleur, raccourcis de période sur le palmarès, retour au tableau de bord sur une page d'erreur, lien d'évitement et focus visibles au clavier.
 
 ### Ajouté
