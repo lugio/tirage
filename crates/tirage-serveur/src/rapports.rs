@@ -21,15 +21,17 @@ pub enum Axe {
     Cabinet,
     Copieur,
     Format,
+    Application,
 }
 
 impl Axe {
-    pub const TOUS: [Axe; 5] = [
+    pub const TOUS: [Axe; 6] = [
         Axe::Utilisateur,
         Axe::Service,
         Axe::Cabinet,
         Axe::Copieur,
         Axe::Format,
+        Axe::Application,
     ];
 
     pub fn du_chemin(s: &str) -> Option<Axe> {
@@ -43,6 +45,7 @@ impl Axe {
             Axe::Cabinet => "cabinet",
             Axe::Copieur => "copieur",
             Axe::Format => "format",
+            Axe::Application => "application",
         }
     }
 
@@ -53,6 +56,7 @@ impl Axe {
             Axe::Cabinet => "Cabinet",
             Axe::Copieur => "Copieur",
             Axe::Format => "Format",
+            Axe::Application => "Application",
         }
     }
 }
@@ -297,6 +301,70 @@ pub fn evolution(
     tranches.into_iter().map(|(_, t)| t).collect()
 }
 
+/// Pages par jour de la semaine (lundi d'abord) et par heure, dans le fuseau. Le détail vient par quart d'heure.
+pub fn activite_horaire(detail: &[(i64, String, i64)], fuseau: &TimeZone) -> [[i64; 24]; 7] {
+    let mut grille = [[0; 24]; 7];
+    for (ms, _, pages) in detail {
+        if let Ok(t) = Timestamp::from_millisecond(*ms) {
+            let z = t.to_zoned(fuseau.clone());
+            let jour = z.weekday().to_monday_zero_offset() as usize;
+            if let Some(case) = grille
+                .get_mut(jour)
+                .and_then(|l| l.get_mut(usize::try_from(z.hour()).unwrap_or(0)))
+            {
+                *case += pages;
+            }
+        }
+    }
+    grille
+}
+
+/// Minutes ouvrées de `[depuis_ms, jusqu_ms[`, du lundi au vendredi, entre `ouverture` et `fermeture` (fin exclue).
+/// Le calcul s'arrête à `plafond` : au-delà, le détail n'importe plus.
+pub fn minutes_ouvrees(
+    depuis_ms: i64,
+    jusqu_ms: i64,
+    fuseau: &TimeZone,
+    (ouverture, fermeture): (u8, u8),
+    plafond: i64,
+) -> i64 {
+    let date = |ms| {
+        Timestamp::from_millisecond(ms)
+            .ok()
+            .map(|t| t.to_zoned(fuseau.clone()).date())
+    };
+    let (Some(mut d), Some(fin)) = (date(depuis_ms), date(jusqu_ms)) else {
+        return 0;
+    };
+    let borne = |j: Date, h: u8| {
+        let (heure, jour) = if h >= 24 {
+            (0, j.tomorrow().ok()?)
+        } else {
+            (i8::try_from(h).ok()?, j)
+        };
+        Some(
+            jour.at(heure, 0, 0, 0)
+                .to_zoned(fuseau.clone())
+                .ok()?
+                .timestamp()
+                .as_millisecond(),
+        )
+    };
+    let mut total = 0;
+    while d <= fin && total < plafond {
+        if d.weekday().to_monday_zero_offset() < 5
+            && let (Some(a), Some(b)) = (borne(d, ouverture), borne(d, fermeture))
+        {
+            total += (b.min(jusqu_ms) - a.max(depuis_ms)).max(0) / 60_000;
+        }
+        match d.tomorrow() {
+            Ok(s) => d = s,
+            Err(_) => break,
+        }
+    }
+    total
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -426,6 +494,46 @@ mod tests {
             ["01/11", "02/11", "03/11"]
         );
         assert_eq!((v[0].noir, v[1].noir, v[2].couleur, v[2].inconnu), (10, 0, 5, 2));
+    }
+
+    #[test]
+    fn activite_horaire_dans_le_fuseau() {
+        // 03/11/2026, un mardi : 08:00 UTC = 09:00 à Paris. 01/11/2026, un dimanche : 23:30 UTC le 31/10 = 00:30.
+        let detail = vec![
+            (ms("2026-11-03T08:00:00Z"), "couleur".to_owned(), 5),
+            (ms("2026-11-03T08:15:00Z"), "noir_et_blanc".to_owned(), 2),
+            (ms("2026-10-31T23:30:00Z"), "noir_et_blanc".to_owned(), 7),
+        ];
+        let g = activite_horaire(&detail, &paris());
+        assert_eq!(g[1][9], 7);
+        assert_eq!(g[6][0], 7);
+        assert_eq!(g.iter().flatten().sum::<i64>(), 14);
+    }
+
+    #[test]
+    fn minutes_ouvrees_sans_week_end_ni_nuit() {
+        let m = |a: &str, b: &str| minutes_ouvrees(ms(a), ms(b), &paris(), (8, 18), 100_000);
+        // Paris en novembre = UTC+1. Mardi 03/11, de 09:00 à 10:30.
+        assert_eq!(m("2026-11-03T08:00:00Z", "2026-11-03T09:30:00Z"), 90);
+        // La nuit ne compte pas : mardi 17:30 à mercredi 08:30 = 30 + 30.
+        assert_eq!(m("2026-11-03T16:30:00Z", "2026-11-04T07:30:00Z"), 60);
+        // Le week-end non plus : vendredi 17:55 à lundi 08:05 = 5 + 5.
+        assert_eq!(m("2026-11-06T16:55:00Z", "2026-11-09T07:05:00Z"), 10);
+        // Tout un samedi : rien.
+        assert_eq!(m("2026-11-07T08:00:00Z", "2026-11-07T16:00:00Z"), 0);
+        // Le plafond arrête le parcours.
+        assert!(minutes_ouvrees(0, ms("2026-11-03T08:00:00Z"), &paris(), (8, 18), 200) < 2000);
+        // Fermeture à minuit.
+        assert_eq!(
+            minutes_ouvrees(
+                ms("2026-11-03T22:00:00Z"),
+                ms("2026-11-04T01:00:00Z"),
+                &paris(),
+                (8, 24),
+                100_000
+            ),
+            60
+        );
     }
 
     #[test]

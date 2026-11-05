@@ -128,6 +128,7 @@ pub fn duree(ms: i64) -> String {
     match s {
         0..60 => format!("{s} s"),
         60..3600 => format!("{} min {} s", s / 60, s % 60),
+        _ if s % 3600 / 60 == 0 => format!("{} h", s / 3600),
         _ => format!("{} h {} min", s / 3600, s % 3600 / 60),
     }
 }

@@ -161,6 +161,13 @@ pub struct ConfigInterface {
     pub http_en_clair: bool,
     /// Fuseau des dates affichées et des bornes de période (nom IANA, ex. « Europe/Paris »).
     pub fuseau: String,
+    /// Un travail compte comme gros à partir de ce nombre de pages (copies comprises).
+    pub gros_travail_pages: u32,
+    /// Temps ouvré sans aucun travail reçu au bout duquel la collecte est signalée comme muette.
+    pub collecte_silence_minutes: u32,
+    /// Heures ouvrées, du lundi au vendredi, dans le fuseau : début inclus, fin exclue.
+    pub heure_ouverture: u8,
+    pub heure_fermeture: u8,
 }
 
 impl Default for ConfigInterface {
@@ -170,6 +177,10 @@ impl Default for ConfigInterface {
             inactivite_minutes: 30,
             http_en_clair: false,
             fuseau: "UTC".into(),
+            gros_travail_pages: 100,
+            collecte_silence_minutes: 120,
+            heure_ouverture: 8,
+            heure_fermeture: 18,
         }
     }
 }
@@ -271,6 +282,14 @@ impl Config {
         if c.interface.session_minutes == 0 || c.interface.inactivite_minutes == 0 {
             return Err("interface : les durées de session doivent être positives".into());
         }
+        if c.interface.gros_travail_pages == 0 || c.interface.collecte_silence_minutes == 0 {
+            return Err(
+                "interface : gros_travail_pages et collecte_silence_minutes doivent être positifs".into(),
+            );
+        }
+        if c.interface.heure_ouverture >= c.interface.heure_fermeture || c.interface.heure_fermeture > 24 {
+            return Err("interface : heures ouvrées invalides".into());
+        }
         if jiff::tz::TimeZone::get(&c.interface.fuseau).is_err() {
             return Err(format!("interface : fuseau inconnu : {}", c.interface.fuseau));
         }
@@ -365,6 +384,15 @@ mod tests {
         let base = "ecoute = \"x\"\nbase = \"b\"\n";
         assert!(Config::lire(&format!("{base}[couts]\nnoir = -1.0\n")).is_err());
         assert!(Config::lire(&format!("{base}[conservation]\ndetail_mois = 0\n")).is_err());
+        assert!(Config::lire(&format!("{base}[interface]\ngros_travail_pages = 0\n")).is_err());
+        assert!(Config::lire(&format!("{base}[interface]\ncollecte_silence_minutes = 0\n")).is_err());
+        assert!(
+            Config::lire(&format!(
+                "{base}[interface]\nheure_ouverture = 18\nheure_fermeture = 8\n"
+            ))
+            .is_err()
+        );
+        assert!(Config::lire(&format!("{base}[interface]\nheure_fermeture = 25\n")).is_err());
         assert!(Config::lire(&format!("{base}[interface]\nfuseau = \"Lune/Base\"\n")).is_err());
         let c = Config::lire(&format!(
             "{base}[interface]\nfuseau = \"Europe/Paris\"\n[couts]\nnoir = 0.01\n[[couts.files]]\nfile = \"F\"\nnoir = 0.02\ncouleur = 0.2\n"
