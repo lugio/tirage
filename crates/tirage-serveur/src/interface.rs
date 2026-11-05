@@ -154,7 +154,46 @@ impl Interface {
         releves: &[ReleveCopieur],
         activite: &[ActiviteCopieur],
         maintenant_ms: i64,
+        periode: &Periode,
     ) -> String {
+        let lignes = self.problemes(releves, maintenant_ms);
+        let mut h = String::new();
+        if !releves.is_empty() {
+            h.push_str("<h2>À traiter</h2>");
+            let mut tableau = Tableau::nouveau(&[
+                Colonne::texte("Copieur"),
+                Colonne::texte("Niveau"),
+                Colonne::texte("Problème"),
+            ]);
+            for (niveau, copieur, texte) in lignes {
+                tableau.ligne([
+                    cellule_cle(Axe::Copieur, copieur, periode),
+                    Cellule::texte(niveau.libelle()),
+                    Cellule::Texte(texte),
+                ]);
+            }
+            h.push_str(&tableau.fin_ou("Aucun problème signalé par les copieurs relevés."));
+            let sans_releve: Vec<&str> = activite
+                .iter()
+                .map(|a| a.file.as_str())
+                .filter(|f| !releves.iter().any(|r| r.copieur.eq_ignore_ascii_case(f)))
+                .collect();
+            if !sans_releve.is_empty() {
+                h.push_str(&note(&format!(
+                    "Aucun relevé reçu pour : {}.",
+                    sans_releve.join(", ")
+                )));
+            }
+        }
+        h
+    }
+
+    /// Problèmes en cours, les plus graves d'abord.
+    fn problemes<'a>(
+        &self,
+        releves: &'a [ReleveCopieur],
+        maintenant_ms: i64,
+    ) -> Vec<(alertes::Niveau, &'a str, String)> {
         let mut lignes: Vec<(alertes::Niveau, &str, String)> = Vec::new();
         for r in releves {
             let silence = rapports::minutes_ouvrees(
@@ -177,39 +216,41 @@ impl Interface {
             }
         }
         lignes.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
-        let mut h = String::new();
-        if !releves.is_empty() {
-            h.push_str("<h2>À traiter</h2>");
-            let mut tableau = Tableau::nouveau(&[
-                Colonne::texte("Copieur"),
-                Colonne::texte("Niveau"),
-                Colonne::texte("Problème"),
-            ]);
-            for (niveau, copieur, texte) in lignes {
-                tableau.ligne([
-                    Cellule::texte(copieur),
-                    Cellule::texte(niveau.libelle()),
-                    Cellule::Texte(texte),
-                ]);
-            }
-            h.push_str(&tableau.fin_ou("Aucun problème signalé par les copieurs relevés."));
-            let sans_releve: Vec<&str> = activite
-                .iter()
-                .map(|a| a.file.as_str())
-                .filter(|f| !releves.iter().any(|r| r.copieur.eq_ignore_ascii_case(f)))
-                .collect();
-            if !sans_releve.is_empty() {
-                h.push_str(&note(&format!(
-                    "Aucun relevé reçu pour : {}.",
-                    sans_releve.join(", ")
-                )));
-            }
+        lignes
+    }
+
+    /// Résumé de l'accueil : ce qui demande une action, et le volume réel de la période.
+    fn resume_copieurs(
+        &self,
+        releves: &[ReleveCopieur],
+        mesures: &[CompteursPeriode],
+        maintenant_ms: i64,
+        periode: &Periode,
+    ) -> String {
+        if releves.is_empty() {
+            return String::new();
         }
-        h
+        let problemes = self.problemes(releves, maintenant_ms);
+        let urgents = problemes
+            .iter()
+            .filter(|p| p.0 == alertes::Niveau::Urgent)
+            .count();
+        let pages: i64 = mesures.iter().filter_map(|m| m.total).sum();
+        let compte = |n: usize| entier(i64::try_from(n).unwrap_or(i64::MAX));
+        let corps = format!(
+            "{}{}",
+            tuiles(&[
+                (compte(urgents), "Problèmes urgents"),
+                (compte(problemes.len() - urgents), "À prévoir"),
+                (entier(pages), "Pages produites, copies comprises"),
+            ]),
+            bouton_lien(&format!("/copieurs?{}", periode.requete()), "Voir les copieurs"),
+        );
+        carte("Copieurs", &corps)
     }
 
     /// Pages réellement produites, d'après les compteurs : les copies faites sur l'appareil y sont.
-    fn pages_produites(&self, mesures: &[CompteursPeriode]) -> String {
+    fn pages_produites(&self, mesures: &[CompteursPeriode], periode: &Periode) -> String {
         let mut h = String::from("<h2>Pages produites</h2>");
         let compte = |v: Option<i64>| Cellule::Nombre(v.map_or("—".to_owned(), entier));
         let mut tableau = Tableau::nouveau(&[
@@ -222,7 +263,7 @@ impl Interface {
         ]);
         for m in mesures {
             tableau.ligne([
-                Cellule::texte(&m.copieur),
+                cellule_cle(Axe::Copieur, &m.copieur, periode),
                 compte(m.total),
                 compte(m.noir),
                 compte(m.couleur),
@@ -769,9 +810,19 @@ async fn accueil(
     let (services, copieurs) = (lignes.first().unwrap_or(&vide), lignes.get(1).unwrap_or(&vide));
     let t = rapports::total(services);
     let maintenant = (c.horloge)();
+    let (du, au) = (periode.du_ms, periode.au_ms);
+    let lu = avec_base(&c.base, move |b| {
+        Ok((b.derniers_releves()?, b.compteurs_periode(du, au)?))
+    })
+    .await;
+    let (releves, mesures) = match lu {
+        Ok(v) => v,
+        Err(rep) => return *rep,
+    };
     let mut h = i.etat_collecte(&receptions, maintenant);
     h.push_str(&i.selecteur(&periode, "/", maintenant));
     h.push_str(&tuiles_de(&t, &i.couts().devise));
+    h.push_str(&i.resume_copieurs(&releves, &mesures, maintenant, &periode));
     if let Some(precedente) = i.periode_precedente(&periode, maintenant) {
         match lire_total(&c, &precedente).await {
             Ok(avant) => h.push_str(&comparaison(&t, &avant, &precedente)),
@@ -954,6 +1005,10 @@ async fn lire_evolution(
 
 /// Le graphique et ses chiffres, repliés dans un tableau pour qui ne peut pas lire le graphique.
 fn bloc_evolution(tranches: &[Tranche]) -> String {
+    bloc_tranches("Pages imprimées par tranche de temps", tranches)
+}
+
+fn bloc_tranches(description: &str, tranches: &[Tranche]) -> String {
     let points: Vec<Point> = tranches
         .iter()
         .map(|t| Point {
@@ -961,8 +1016,7 @@ fn bloc_evolution(tranches: &[Tranche]) -> String {
             valeurs: vec![t.noir, t.couleur, t.inconnu],
         })
         .collect();
-    let Some(svg) = colonnes_empilees("Pages imprimées par tranche de temps", "pages", &SERIES, &points)
-    else {
+    let Some(svg) = colonnes_empilees(description, "pages", &SERIES, &points) else {
         return note("Aucune page sur cette période.");
     };
     let mut tableau = Tableau::nouveau(&[
@@ -1241,15 +1295,29 @@ async fn vue(c: Contexte, s: Session, vue: Vue, valeur: String, d: Demande) -> R
         } else {
             None
         };
+        let machine = if vue == Vue::Copieur {
+            Some((
+                b.derniers_releves()?
+                    .into_iter()
+                    .find(|r| r.copieur.eq_ignore_ascii_case(&valeur_lue)),
+                b.compteurs_periode(du, au)?
+                    .into_iter()
+                    .find(|m| m.copieur.eq_ignore_ascii_case(&valeur_lue)),
+                b.ecarts_compteurs(&valeur_lue, du, au)?,
+            ))
+        } else {
+            None
+        };
         Ok((
             rapports::construire(&lignes1, &interface.couts()),
             rapports::construire(&lignes2, &interface.couts()),
             temps,
             activite,
+            machine,
         ))
     })
     .await;
-    let (lignes1, lignes2, temps, activite) = match lu {
+    let (lignes1, lignes2, temps, activite, machine) = match lu {
         Ok(v) => v,
         Err(rep) => return *rep,
     };
@@ -1257,6 +1325,18 @@ async fn vue(c: Contexte, s: Session, vue: Vue, valeur: String, d: Demande) -> R
     let (axe1, axe2) = vue.axes();
     let tranches = rapports::evolution(periode.du, periode.au, &i.fuseau, &temps, &[]);
     let mut h = i.selecteur(&periode, &action, maintenant);
+    if let Some((releve, mesure, ecarts)) = &machine {
+        let produites = rapports::evolution(periode.du, periode.au, &i.fuseau, ecarts, &[]);
+        h.push_str(&bloc_appareil(
+            &i,
+            releve.as_ref(),
+            mesure.as_ref(),
+            &produites,
+            maintenant,
+            &periode,
+        ));
+        h.push_str("<h2>Travaux passés par le serveur</h2>");
+    }
     h.push_str(&tuiles_de(&t, &i.couts().devise));
     h.push_str(&note(
         "Seuls les travaux imprimés encore en détail sont comptés. Consultation inscrite au journal.",
@@ -1478,9 +1558,10 @@ async fn copieurs(
     };
     let t = rapports::total(lignes);
     let mut h = i.etat_collecte(&receptions, maintenant);
-    h.push_str(&i.a_traiter(&releves, &activite, maintenant));
+    h.push_str(&i.a_traiter(&releves, &activite, maintenant, &periode));
+    h.push_str(&tableau_consommables(&releves, &periode));
     h.push_str(&i.selecteur(&periode, "/copieurs", maintenant));
-    h.push_str(&i.pages_produites(&mesures));
+    h.push_str(&i.pages_produites(&mesures, &periode));
     h.push_str(&note_sur_le_calcul(&t, non_imprimes, &i.couts().devise));
     h.push_str(&i.avis_conservation(&periode, maintenant));
     h.push_str("<h2>Activité</h2>");
@@ -1508,27 +1589,17 @@ async fn copieurs(
         Colonne::nombre("N&B"),
         Colonne::nombre("Couleur"),
         Colonne::texte("État"),
-        Colonne::texte("Consommables"),
         Colonne::texte("Alertes"),
     ]);
     for r in &releves {
-        let conso: Vec<String> = r
-            .consommables
-            .iter()
-            .map(|x| match x.pourcentage() {
-                Some(p) => format!("{} : {p} %", x.description),
-                None => x.description.clone(),
-            })
-            .collect();
         tableau.ligne([
-            Cellule::texte(&r.copieur),
+            cellule_cle(Axe::Copieur, &r.copieur, &periode),
             Cellule::texte(r.modele.as_deref().unwrap_or("")),
             Cellule::Texte(c.interface.heure(r.releve_ms)),
             compteur(r.compteur_total),
             compteur(r.compteur_noir),
             compteur(r.compteur_couleur),
             Cellule::texte(r.etat.as_deref().unwrap_or("")),
-            Cellule::Texte(conso.join(", ")),
             Cellule::Texte(
                 alertes::lire(&r.alertes)
                     .into_iter()
@@ -1540,6 +1611,139 @@ async fn copieurs(
     }
     h.push_str(&tableau.fin_ou("Aucun relevé reçu : le relevé SNMP des copieurs n'est pas encore actif."));
     Html(page(Rubrique::Copieurs, "Copieurs", &h, Some(&s))).into_response()
+}
+
+/// Colonnes de toner, et comment les reconnaître dans la description donnée par l'appareil.
+const TONERS: [(&str, [&str; 2]); 4] = [
+    ("Noir", ["black", "noir"]),
+    ("Cyan", ["cyan", "cyan"]),
+    ("Magenta", ["magenta", "magenta"]),
+    ("Jaune", ["yellow", "jaune"]),
+];
+
+/// Couleur de toner d'un consommable. Un tambour ou un bac de récupération porte aussi une couleur sans être un toner.
+fn rang_toner(description: &str) -> Option<usize> {
+    let d = description.to_lowercase();
+    if ["waste", "drum", "imaging", "developer", "tambour", "récupér"]
+        .iter()
+        .any(|m| d.contains(m))
+    {
+        return None;
+    }
+    TONERS
+        .iter()
+        .position(|(_, mots)| mots.iter().any(|m| d.contains(m)))
+}
+
+/// Niveaux connus de chaque toner d'un relevé.
+fn niveaux_toner(r: &ReleveCopieur) -> [Option<u8>; 4] {
+    let mut niveaux = [None; 4];
+    for c in &r.consommables {
+        if let Some(rang) = rang_toner(&c.description) {
+            niveaux[rang] = niveaux[rang].or(c.pourcentage());
+        }
+    }
+    niveaux
+}
+
+/// Consommables mesurés qui ne sont pas des toners. Ceux qui ne donnent qu'un état (agrafes…) ne disent rien ici.
+fn autres_consommables(r: &ReleveCopieur) -> String {
+    r.consommables
+        .iter()
+        .filter(|c| rang_toner(&c.description).is_none())
+        .filter_map(|c| c.pourcentage().map(|p| format!("{} : {p} %", c.description)))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Les consommables, les copieurs au toner le plus bas d'abord.
+fn tableau_consommables(releves: &[ReleveCopieur], periode: &Periode) -> String {
+    let mut lignes: Vec<(&ReleveCopieur, [Option<u8>; 4])> =
+        releves.iter().map(|r| (r, niveaux_toner(r))).collect();
+    lignes.sort_by_key(|(r, n)| {
+        (
+            n.iter().flatten().min().copied().unwrap_or(u8::MAX),
+            r.copieur.clone(),
+        )
+    });
+    let mut colonnes = vec![Colonne::texte("Copieur")];
+    colonnes.extend(TONERS.iter().map(|(nom, _)| Colonne::nombre(nom)));
+    let avec_autres = lignes.iter().any(|(r, _)| !autres_consommables(r).is_empty());
+    if avec_autres {
+        colonnes.push(Colonne::texte("Autres"));
+    }
+    let mut tableau = Tableau::nouveau(&colonnes);
+    for (r, niveaux) in lignes {
+        let mut cellules = vec![cellule_cle(Axe::Copieur, &r.copieur, periode)];
+        cellules.extend(TONERS.iter().zip(niveaux).map(|((nom, _), n)| match n {
+            Some(p) => Cellule::Html(format!(
+                "{p} %{}",
+                jauge(i64::from(p), 100, &format!("Toner {nom} : {p} %"))
+            )),
+            None => Cellule::Nombre("—".to_owned()),
+        }));
+        if avec_autres {
+            cellules.push(Cellule::Texte(autres_consommables(r)));
+        }
+        tableau.ligne(cellules);
+    }
+    format!(
+        "<h2>Consommables</h2><div class=\"colonnes-egales\">{}</div>",
+        tableau.fin_ou("Aucun relevé reçu : pas de niveau de toner connu.")
+    )
+}
+
+/// La machine vue par ses relevés : état, alertes, consommables et pages produites.
+fn bloc_appareil(
+    i: &Interface,
+    releve: Option<&ReleveCopieur>,
+    mesure: Option<&CompteursPeriode>,
+    produites: &[Tranche],
+    maintenant_ms: i64,
+    periode: &Periode,
+) -> String {
+    let Some(r) = releve else {
+        return note("Aucun relevé SNMP reçu pour ce copieur : seuls les travaux sont connus.");
+    };
+    let compteur =
+        |v: Option<u64>| v.map_or("—".to_owned(), |n| entier(i64::try_from(n).unwrap_or(i64::MAX)));
+    let mut fiche = Tableau::sans_entete();
+    for (titre, valeur) in [
+        ("Modèle", r.modele.clone().unwrap_or_default()),
+        ("N° de série", r.numero_serie.clone().unwrap_or_default()),
+        ("État", r.etat.clone().unwrap_or_default()),
+        ("Relevé le", i.heure(r.releve_ms)),
+        ("Compteur total", compteur(r.compteur_total)),
+        ("Compteur N&B", compteur(r.compteur_noir)),
+        ("Compteur couleur", compteur(r.compteur_couleur)),
+    ] {
+        fiche.ligne([Cellule::texte(titre), Cellule::Texte(valeur)]);
+    }
+    let problemes = i.problemes(std::slice::from_ref(r), maintenant_ms);
+    let mut bilan = Tableau::nouveau(&[Colonne::texte("Niveau"), Colonne::texte("Problème")]);
+    for (niveau, _, texte) in problemes {
+        bilan.ligne([Cellule::texte(niveau.libelle()), Cellule::Texte(texte)]);
+    }
+    let mut h = String::from("<h2>Appareil</h2><div class=\"grille\">");
+    h.push_str(&carte("Relevé", &fiche.fin()));
+    h.push_str(&carte("À traiter", &bilan.fin_ou("Aucun problème signalé.")));
+    h.push_str("</div>");
+    h.push_str(&tableau_consommables(std::slice::from_ref(r), periode));
+    if let Some(m) = mesure {
+        h.push_str(&tuiles(&[
+            (
+                m.total.map_or("—".to_owned(), entier),
+                "Pages produites, copies comprises",
+            ),
+            (m.noir.map_or("—".to_owned(), entier), "N&B"),
+            (m.couleur.map_or("—".to_owned(), entier), "Couleur"),
+        ]));
+    }
+    h.push_str(&carte(
+        "Pages produites dans le temps",
+        &bloc_tranches("Pages produites par tranche de temps", produites),
+    ));
+    h
 }
 
 /// Ce qui est affiché dans le formulaire des tarifs : les prix enregistrés, ou la saisie à corriger.
@@ -2520,7 +2724,7 @@ mod tests {
         let maintenant = 1793696400000;
         let ancien = releve_seul("MUET", maintenant - 24 * 3_600_000, &["bourrage"]);
         let recent = releve_seul("ACTIF", maintenant - 1_800_000, &["bourrage", "Sleep"]);
-        let h = i.a_traiter(&[ancien, recent], &[], maintenant);
+        let h = i.a_traiter(&[ancien, recent], &[], maintenant, &periode_essai());
         assert!(h.contains("Ne répond plus depuis"), "{h}");
         assert_eq!(h.matches("Bourrage").count(), 1, "{h}");
         assert!(!h.contains("Sleep"), "{h}");
@@ -2529,27 +2733,112 @@ mod tests {
     #[test]
     fn a_traiter_rien_sans_releve_et_rien_a_signaler() {
         let i = interface_essai();
-        assert_eq!(i.a_traiter(&[], &[], 0), "");
+        assert_eq!(i.a_traiter(&[], &[], 0, &periode_essai()), "");
         let maintenant = 1793696400000;
         let calme = releve_seul("ACTIF", maintenant, &["intervention demandée", "Sleep"]);
-        let h = i.a_traiter(&[calme], &[], maintenant);
+        let h = i.a_traiter(&[calme], &[], maintenant, &periode_essai());
         assert!(h.contains("Aucun problème"), "{h}");
     }
 
     #[test]
     fn pages_produites_sans_mesure_et_compteur_recule() {
         let i = interface_essai();
-        assert!(i.pages_produites(&[]).contains("Pas encore de mesure"));
-        let h = i.pages_produites(&[CompteursPeriode {
-            copieur: "C1".into(),
-            debut_ms: 0,
-            fin_ms: 1,
-            total: None,
-            noir: None,
-            couleur: None,
-            remis_a_zero: true,
-        }]);
+        assert!(
+            i.pages_produites(&[], &periode_essai())
+                .contains("Pas encore de mesure")
+        );
+        let h = i.pages_produites(
+            &[CompteursPeriode {
+                copieur: "C1".into(),
+                debut_ms: 0,
+                fin_ms: 1,
+                total: None,
+                noir: None,
+                couleur: None,
+                remis_a_zero: true,
+            }],
+            &periode_essai(),
+        );
         assert!(h.contains("revenu en arrière"), "{h}");
+    }
+
+    fn periode_essai() -> Periode {
+        let d = Demande {
+            du: Some("2026-11-01".into()),
+            au: Some("2026-11-30".into()),
+        };
+        Periode::lire(&d, MAINTENANT, &TimeZone::UTC).unwrap()
+    }
+
+    #[test]
+    fn consommables_du_plus_bas_au_plus_haut_sans_bruit() {
+        let conso = |d: &str, n: i64, c: i64| tirage_modele::Consommable {
+            description: d.into(),
+            niveau: Some(n),
+            capacite: Some(c),
+        };
+        let mut plein = releve_seul("PLEIN", 0, &[]);
+        plein.consommables = vec![conso("Toner (Black)", 80, 100), conso("Toner (Yellow)", 70, 100)];
+        let mut bas = releve_seul("BAS", 0, &[]);
+        bas.consommables = vec![
+            conso("Toner (Cyan)", 3, 100),
+            conso("Waste Toner Box", -3, -2),
+            conso("Toner (Black)", 90, 100),
+        ];
+        assert_eq!(niveaux_toner(&bas), [Some(90), Some(3), None, None]);
+        let h = tableau_consommables(&[plein, bas], &periode_essai());
+        assert!(h.find(">BAS<").unwrap() < h.find(">PLEIN<").unwrap(), "{h}");
+        assert!(!h.contains("Waste"), "{h}");
+        assert!(!h.contains("Autres"), "{h}");
+        let mut tambour = releve_seul("T", 0, &[]);
+        tambour.consommables = vec![conso("Drum Unit (Black)", 55, 100)];
+        assert_eq!(niveaux_toner(&tambour), [None; 4]);
+        assert_eq!(autres_consommables(&tambour), "Drum Unit (Black) : 55 %");
+        assert!(h.contains("Toner Cyan : 3 %"), "{h}");
+    }
+
+    #[tokio::test]
+    async fn accueil_resume_les_copieurs_et_fiche_de_l_appareil() {
+        let b = banc();
+        charger_jeu(&b);
+        let cookie = b.connecter().await;
+        let sans = b.get(&format!("/?{NOVEMBRE}"), Some(&cookie)).await;
+        assert!(!sans.texte.contains("Voir les copieurs"), "{}", sans.texte);
+        let sans_releve = b
+            .get(&format!("/copieurs/COPIEUR-1?{NOVEMBRE}"), Some(&cookie))
+            .await;
+        assert!(
+            sans_releve.texte.contains("Aucun relevé SNMP reçu"),
+            "{}",
+            sans_releve.texte
+        );
+        {
+            let mut base = b.base.lock().unwrap();
+            let fin = MAINTENANT - 60_000;
+            base.enregistrer(&releve("COPIEUR-1", fin - 3_600_000, 1_000, &[]), 0)
+                .unwrap();
+            base.enregistrer(&releve("COPIEUR-1", fin, 1_250, &["bourrage"]), 0)
+                .unwrap();
+        }
+        let r = b.get(&format!("/?{NOVEMBRE}"), Some(&cookie)).await;
+        assert!(r.texte.contains("Voir les copieurs"), "{}", r.texte);
+        assert!(r.texte.contains("Problèmes urgents"), "{}", r.texte);
+        let f = b
+            .get(&format!("/copieurs/COPIEUR-1?{NOVEMBRE}"), Some(&cookie))
+            .await;
+        assert_eq!(f.code, StatusCode::OK);
+        for attendu in [
+            "Appareil",
+            "Bourrage",
+            "Pages produites dans le temps",
+            "Travaux passés par le serveur",
+        ] {
+            assert!(f.texte.contains(attendu), "{attendu} : {}", f.texte);
+        }
+        let autre = b
+            .get(&format!("/services/Service%20A?{NOVEMBRE}"), Some(&cookie))
+            .await;
+        assert!(!autre.texte.contains("Appareil"), "{}", autre.texte);
     }
 
     fn interface_essai() -> Interface {
