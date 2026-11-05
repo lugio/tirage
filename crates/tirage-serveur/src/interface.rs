@@ -8,6 +8,7 @@
 //! - Tout texte venu des travaux ou de l'annuaire est échappé (un titre de document peut contenir du HTML).
 //! - Cookie `SameSite=Strict` : un autre site ne peut pas déclencher d'action d'une session ouverte.
 
+mod alertes;
 mod gabarit;
 mod graphique;
 
@@ -23,9 +24,10 @@ use jiff::civil::Date;
 use jiff::tz::TimeZone;
 use jiff::{Timestamp, ToSpan};
 use serde::Deserialize;
+use tirage_modele::ReleveCopieur;
 
 use crate::annuaire::{Annuaire, ErreurAuth, identifiant_nu};
-use crate::base::{ActiviteCopieur, Base, Filtre};
+use crate::base::{ActiviteCopieur, Base, CompteursPeriode, Filtre};
 use crate::config::{ConfigCouts, ConfigInterface, TarifFile};
 use crate::conservation::limite_ms;
 use crate::rapports::{self, Axe, Ligne, Tranche};
@@ -38,6 +40,8 @@ use gabarit::{
 use graphique::{Point, Serie, barre, chaleur, colonnes_empilees, jauge, legende, segments};
 
 const COOKIE: &str = "tirage_session";
+/// Minutes ouvrées sans relevé au-delà desquelles un copieur déjà relevé est dit muet.
+const RELEVE_MUET_MINUTES: i64 = 120;
 const CORPS_MAX: usize = 16 * 1024;
 const LONGUEUR_MAX: usize = 1024;
 const LIGNES_DETAIL: u32 = 500;
@@ -140,6 +144,110 @@ impl Interface {
                 note(&format!("Collecte : {collecteur}, dernier travail reçu le {quand}."))
             });
         }
+        h
+    }
+
+    /// Ce qui demande une action sur les copieurs. Un relevé ancien n'est plus cru : le copieur est dit muet, et ses
+    /// alertes ne sont pas reprises. Les heures ouvrées évitent de signaler chaque soir un appareil en veille.
+    fn a_traiter(
+        &self,
+        releves: &[ReleveCopieur],
+        activite: &[ActiviteCopieur],
+        maintenant_ms: i64,
+    ) -> String {
+        let mut lignes: Vec<(alertes::Niveau, &str, String)> = Vec::new();
+        for r in releves {
+            let silence = rapports::minutes_ouvrees(
+                r.releve_ms,
+                maintenant_ms,
+                &self.fuseau,
+                self.heures_ouvrees,
+                RELEVE_MUET_MINUTES,
+            );
+            if silence >= RELEVE_MUET_MINUTES {
+                lignes.push((
+                    alertes::Niveau::Urgent,
+                    &r.copieur,
+                    format!("Ne répond plus depuis le {}", self.heure(r.releve_ms)),
+                ));
+                continue;
+            }
+            for a in alertes::lire(&r.alertes) {
+                lignes.push((a.niveau, &r.copieur, a.texte));
+            }
+        }
+        lignes.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+        let mut h = String::new();
+        if !releves.is_empty() {
+            h.push_str("<h2>À traiter</h2>");
+            let mut tableau = Tableau::nouveau(&[
+                Colonne::texte("Copieur"),
+                Colonne::texte("Niveau"),
+                Colonne::texte("Problème"),
+            ]);
+            for (niveau, copieur, texte) in lignes {
+                tableau.ligne([
+                    Cellule::texte(copieur),
+                    Cellule::texte(niveau.libelle()),
+                    Cellule::Texte(texte),
+                ]);
+            }
+            h.push_str(&tableau.fin_ou("Aucun problème signalé par les copieurs relevés."));
+            let sans_releve: Vec<&str> = activite
+                .iter()
+                .map(|a| a.file.as_str())
+                .filter(|f| !releves.iter().any(|r| r.copieur.eq_ignore_ascii_case(f)))
+                .collect();
+            if !sans_releve.is_empty() {
+                h.push_str(&note(&format!(
+                    "Aucun relevé reçu pour : {}.",
+                    sans_releve.join(", ")
+                )));
+            }
+        }
+        h
+    }
+
+    /// Pages réellement produites, d'après les compteurs : les copies faites sur l'appareil y sont.
+    fn pages_produites(&self, mesures: &[CompteursPeriode]) -> String {
+        let mut h = String::from("<h2>Pages produites</h2>");
+        let compte = |v: Option<i64>| Cellule::Nombre(v.map_or("—".to_owned(), entier));
+        let mut tableau = Tableau::nouveau(&[
+            Colonne::texte("Copieur"),
+            Colonne::nombre("Total"),
+            Colonne::nombre("N&B"),
+            Colonne::nombre("Couleur"),
+            Colonne::texte("Mesuré du"),
+            Colonne::texte("au"),
+        ]);
+        for m in mesures {
+            tableau.ligne([
+                Cellule::texte(&m.copieur),
+                compte(m.total),
+                compte(m.noir),
+                compte(m.couleur),
+                Cellule::Texte(self.heure(m.debut_ms)),
+                Cellule::Texte(self.heure(m.fin_ms)),
+            ]);
+        }
+        h.push_str(
+            &tableau
+                .fin_ou("Pas encore de mesure sur cette période : il faut deux relevés d'un même copieur."),
+        );
+        let remis: Vec<&str> = mesures
+            .iter()
+            .filter(|m| m.remis_a_zero)
+            .map(|m| m.copieur.as_str())
+            .collect();
+        if !remis.is_empty() {
+            h.push_str(&note(&format!(
+                "Compteur revenu en arrière, mesure impossible : {}.",
+                remis.join(", ")
+            )));
+        }
+        h.push_str(&note(
+            "Différence entre deux relevés des compteurs de l'appareil, copies comprises, tandis que l'activité ci-dessous ne compte que les travaux passés par le serveur d'impression.",
+        ));
         h
     }
 
@@ -1353,10 +1461,14 @@ async fn copieurs(
         i64::from(i.gros_travail_couleur_pages),
     );
     let lu = avec_base(&c.base, move |b| {
-        Ok((b.activite_copieurs(du, au, seuil)?, b.derniers_releves()?))
+        Ok((
+            b.activite_copieurs(du, au, seuil)?,
+            b.derniers_releves()?,
+            b.compteurs_periode(du, au)?,
+        ))
     })
     .await;
-    let (activite, releves) = match lu {
+    let (activite, releves, mesures) = match lu {
         Ok(r) => r,
         Err(rep) => return *rep,
     };
@@ -1366,7 +1478,9 @@ async fn copieurs(
     };
     let t = rapports::total(lignes);
     let mut h = i.etat_collecte(&receptions, maintenant);
+    h.push_str(&i.a_traiter(&releves, &activite, maintenant));
     h.push_str(&i.selecteur(&periode, "/copieurs", maintenant));
+    h.push_str(&i.pages_produites(&mesures));
     h.push_str(&note_sur_le_calcul(&t, non_imprimes, &i.couts().devise));
     h.push_str(&i.avis_conservation(&periode, maintenant));
     h.push_str("<h2>Activité</h2>");
@@ -1415,7 +1529,13 @@ async fn copieurs(
             compteur(r.compteur_couleur),
             Cellule::texte(r.etat.as_deref().unwrap_or("")),
             Cellule::Texte(conso.join(", ")),
-            Cellule::Texte(r.alertes.join(", ")),
+            Cellule::Texte(
+                alertes::lire(&r.alertes)
+                    .into_iter()
+                    .map(|a| a.texte)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
         ]);
     }
     h.push_str(&tableau.fin_ou("Aucun relevé reçu : le relevé SNMP des copieurs n'est pas encore actif."));
@@ -2352,6 +2472,103 @@ mod tests {
         assert!(!b.journal().iter().any(|(_, a, _)| a == "tableau"));
         let r = b.get("/?du=2020-01-01&au=2026-11-15", Some(&cookie)).await;
         assert_eq!(r.code, StatusCode::OK);
+    }
+
+    fn releve(copieur: &str, ms: i64, total: u64, alertes: &[&str]) -> Evenement {
+        Evenement::Releve(ReleveCopieur {
+            collecteur: "impression-1".into(),
+            copieur: copieur.into(),
+            releve_ms: ms,
+            modele: None,
+            numero_serie: None,
+            compteur_total: Some(total),
+            compteur_noir: Some(total - 10),
+            compteur_couleur: Some(10),
+            consommables: vec![],
+            etat: None,
+            alertes: alertes.iter().map(|a| (*a).to_owned()).collect(),
+        })
+    }
+
+    #[tokio::test]
+    async fn page_des_copieurs_pages_produites_et_a_traiter() {
+        let b = banc();
+        charger_jeu(&b);
+        {
+            let mut base = b.base.lock().unwrap();
+            base.enregistrer(&releve("COPIEUR-1", DEBUT_NOVEMBRE, 1_000, &["Sleep"]), 0)
+                .unwrap();
+            let fin = DEBUT_NOVEMBRE + 3_600_000;
+            base.enregistrer(
+                &releve("COPIEUR-1", fin, 1_250, &["No Paper Tray2", "bourrage"]),
+                0,
+            )
+            .unwrap();
+        }
+        let cookie = b.connecter().await;
+        let r = b.get(&format!("/copieurs?{NOVEMBRE}"), Some(&cookie)).await;
+        assert_eq!(r.code, StatusCode::OK);
+        assert!(r.texte.contains("Pages produites"), "{}", r.texte);
+        assert!(r.texte.contains(">250<"), "{}", r.texte);
+        assert!(r.texte.contains("À traiter"), "{}", r.texte);
+    }
+
+    #[test]
+    fn a_traiter_copieur_muet_et_alertes() {
+        let i = interface_essai();
+        // Mardi 3 novembre 2026, 10 h (Paris) : dernier relevé la veille, ou dans l'heure.
+        let maintenant = 1793696400000;
+        let ancien = releve_seul("MUET", maintenant - 24 * 3_600_000, &["bourrage"]);
+        let recent = releve_seul("ACTIF", maintenant - 1_800_000, &["bourrage", "Sleep"]);
+        let h = i.a_traiter(&[ancien, recent], &[], maintenant);
+        assert!(h.contains("Ne répond plus depuis"), "{h}");
+        assert_eq!(h.matches("Bourrage").count(), 1, "{h}");
+        assert!(!h.contains("Sleep"), "{h}");
+    }
+
+    #[test]
+    fn a_traiter_rien_sans_releve_et_rien_a_signaler() {
+        let i = interface_essai();
+        assert_eq!(i.a_traiter(&[], &[], 0), "");
+        let maintenant = 1793696400000;
+        let calme = releve_seul("ACTIF", maintenant, &["intervention demandée", "Sleep"]);
+        let h = i.a_traiter(&[calme], &[], maintenant);
+        assert!(h.contains("Aucun problème"), "{h}");
+    }
+
+    #[test]
+    fn pages_produites_sans_mesure_et_compteur_recule() {
+        let i = interface_essai();
+        assert!(i.pages_produites(&[]).contains("Pas encore de mesure"));
+        let h = i.pages_produites(&[CompteursPeriode {
+            copieur: "C1".into(),
+            debut_ms: 0,
+            fin_ms: 1,
+            total: None,
+            noir: None,
+            couleur: None,
+            remis_a_zero: true,
+        }]);
+        assert!(h.contains("revenu en arrière"), "{h}");
+    }
+
+    fn interface_essai() -> Interface {
+        let annuaire: Arc<dyn Annuaire> = Arc::new(FauxAnnuaire {
+            appels: AtomicU32::new(0),
+            en_panne: false,
+        });
+        let conf = ConfigInterface {
+            fuseau: "Europe/Paris".into(),
+            ..ConfigInterface::default()
+        };
+        Interface::nouvelle(annuaire, &conf, couts_fictifs(), 12)
+    }
+
+    fn releve_seul(copieur: &str, ms: i64, alertes: &[&str]) -> ReleveCopieur {
+        match releve(copieur, ms, 100, alertes) {
+            Evenement::Releve(r) => r,
+            _ => unreachable!(),
+        }
     }
 
     #[tokio::test]
