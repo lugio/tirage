@@ -13,7 +13,7 @@ const BASE: i64 = 190;
 const HAUT: i64 = 14;
 /// En dessous, les colonnes restent centrées et fines plutôt que d'occuper toute la largeur.
 const CASES_MIN: usize = 12;
-const MARGE: f64 = 2.0;
+const MARGE: f64 = 5.0;
 const ETIQUETTES_MAX: usize = 7;
 /// En dessous de cette part, le pourcentage ne tient pas dans son segment : il reste dans le survol.
 const PART_ETIQUETEE: i64 = 8;
@@ -224,7 +224,7 @@ pub fn barre(valeur: i64, max: i64, libelle: &str) -> String {
     };
     format!(
         "<svg class=\"barre\" width=\"100%\" height=\"12\" role=\"img\" aria-label=\"{t}\"><title>{t}</title>\
-         <rect class=\"piste\" width=\"100%\" height=\"12\" rx=\"4\"/><rect class=\"noir\" width=\"{}\" height=\"12\" rx=\"4\"/></svg>",
+         <rect class=\"piste\" width=\"100%\" height=\"12\" rx=\"4\"/><rect class=\"jauge\" width=\"{}\" height=\"12\" rx=\"4\"/></svg>",
         pourcent(l),
         t = echapper(libelle)
     )
@@ -252,8 +252,8 @@ pub fn chaleur(
         TETE + RANG * lignes.len(),
         echapper(description)
     );
-    // Une étiquette sur deux au-delà de douze colonnes, pour qu'elles tiennent sur mobile.
-    let pas = if colonnes.len() > 12 { 2 } else { 1 };
+    // Une étiquette sur trois au-delà de douze colonnes, pour qu'elles tiennent sur mobile.
+    let pas = if colonnes.len() > 12 { 3 } else { 1 };
     for (i, c) in colonnes.iter().enumerate().step_by(pas) {
         let _ = write!(
             h,
@@ -288,9 +288,9 @@ pub fn chaleur(
     Some(h)
 }
 
-/// Part d'un tout pour une seule mesure, dans une couleur qui n'est celle d'aucune série.
-pub fn jauge(valeur: i64, max: i64, libelle: &str) -> String {
-    barre(valeur, max, libelle).replace("class=\"noir\"", "class=\"jauge\"")
+/// Niveau à surveiller : même barre, teinte d'alerte. Le chiffre voisin dit la même chose sans la couleur.
+pub fn barre_basse(valeur: i64, max: i64, libelle: &str) -> String {
+    barre(valeur, max, libelle).replace("class=\"jauge\"", "class=\"jauge basse\"")
 }
 
 #[cfg(test)]
@@ -425,8 +425,9 @@ mod tests {
     }
 
     #[test]
-    fn une_jauge_n_emprunte_pas_la_couleur_d_une_serie() {
-        let h = jauge(1, 2, "d");
+    fn une_barre_n_emprunte_pas_la_couleur_d_une_serie() {
+        assert!(barre_basse(1, 2, "d").contains("class=\"jauge basse\""));
+        let h = barre(1, 2, "d");
         assert!(
             h.contains("class=\"jauge\"") && !h.contains("class=\"noir\""),
             "{h}"

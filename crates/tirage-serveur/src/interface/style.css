@@ -18,6 +18,9 @@
   --erreur: #a00000;
   --fond-erreur: #fdf0f0;
   --bord-erreur: #f0c8c8;
+  --attention: #6f4a00;
+  --fond-attention: #fdf4dc;
+  --bord-attention: #eeda9f;
   --serie-noir: #2a78d6;
   --serie-couleur: #eb6834;
   --serie-inconnu: #1baf7a;
@@ -41,6 +44,9 @@
     --erreur: #ffb4b4;
     --fond-erreur: #3a1f1f;
     --bord-erreur: #5c2f2f;
+    --attention: #f2cf85;
+    --fond-attention: #3a2f14;
+    --bord-attention: #5c4a1f;
     --serie-noir: #3987e5;
     --serie-couleur: #d95926;
     --serie-inconnu: #199e70;
@@ -56,6 +62,10 @@ body {
   background: var(--fond);
 }
 a { color: var(--lien); }
+:focus-visible { outline: 2px solid var(--lien); outline-offset: 2px; }
+header :focus-visible { outline-color: #fff; }
+.evitement { position: absolute; left: -100vw; padding: .4rem .8rem; color: var(--lien); background: var(--surface); }
+.evitement:focus { left: .5rem; top: .5rem; z-index: 2; }
 h1 { margin: .25rem 0 1rem; font-size: clamp(1.3rem, 1rem + 1.2vw, 1.75rem); }
 h2 { margin: 0 0 .75rem; font-size: 1.05rem; }
 main { max-width: 100rem; margin: 0 auto; padding: 1.25rem var(--marge) 2.5rem; }
@@ -127,7 +137,9 @@ form[action='/connexion'], form.periode {
   border: 1px solid var(--bord);
   border-radius: var(--rayon);
 }
-form[action='/connexion'] { max-width: 22rem; padding: 1.25rem; }
+/* La connexion est la seule chose à faire sur sa page : elle y est centrée. */
+main:has(form[action='/connexion']) { max-width: 24rem; padding-top: 3rem; }
+form[action='/connexion'] { padding: 1.25rem; }
 form[action='/connexion'] input { display: block; width: 100%; box-sizing: border-box; margin-top: .25rem; }
 form[action='/connexion'] button { margin-top: .5rem; }
 form.periode {
@@ -155,6 +167,14 @@ form.periode label { margin: 0; }
 /* Le tableau défile : une ligne de tableau reste sur une ligne. Dans une carte, il doit tenir : il passe à la ligne. */
 .defile td, .defile th { white-space: nowrap; }
 .carte .defile td, .carte .defile th { white-space: normal; }
+/* Un intitulé long ou un nom long passent à la ligne plutôt que de pousser les chiffres hors de l'écran. */
+.defile th, .defile td:first-child { white-space: normal; }
+.defile td:first-child { min-width: 7rem; overflow-wrap: anywhere; }
+/* Dans une carte, la première colonne est souvent un simple rang. */
+.carte .defile td:first-child { min-width: 0; overflow-wrap: normal; }
+.carte .defile td { overflow-wrap: anywhere; }
+.carte .defile td.n { overflow-wrap: normal; }
+th { vertical-align: bottom; }
 table {
   width: 100%;
   border-collapse: collapse;
@@ -203,6 +223,8 @@ g:hover > .cible { fill: var(--entete-tableau); }
 .barre { min-width: 4rem; }
 .piste { fill: var(--entete-tableau); }
 td:has(> .barre) { width: 45%; }
+/* Dans une petite carte, le nom passe avant la barre. */
+.grille .carte td:has(> .barre) { width: 35%; }
 .carte td.n:first-child { width: 1%; }
 .legende { display: flex; flex-wrap: wrap; gap: .25rem 1rem; margin: .25rem 0 .5rem; padding: 0; list-style: none; font-size: .85rem; color: var(--texte-doux); }
 .pastille { display: inline-block; width: .7rem; height: .7rem; margin-right: .35rem; border-radius: 3px; }
@@ -217,6 +239,8 @@ details .defile { margin-top: .5rem; }
   form.periode label { flex: 1 1 100%; }
   form.periode input { width: 100%; box-sizing: border-box; }
   th, td { padding: .35rem .5rem; }
+  /* Liens de tableau assez hauts pour le doigt. */
+  td a, summary { display: inline-block; padding: .2rem 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -239,6 +263,16 @@ rect.chaleur.n4 { fill-opacity: .78; }
 .carte + .carte { margin-top: 1rem; }
 .grille > .carte + .carte { margin-top: 0; }
 
-.colonnes-egales table {
-  table-layout: fixed;
-}
+/* Jauges alignées d'une ligne à l'autre ; le nom du copieur passe à la ligne au lieu de les recouvrir. */
+.colonnes-egales table { table-layout: fixed; min-width: 34rem; }
+.colonnes-egales th:first-child { width: 24%; }
+.colonnes-egales td { white-space: normal; overflow-wrap: anywhere; }
+rect.jauge.basse { fill: var(--erreur); }
+
+/* Niveau d'un problème : le mot le dit, la teinte aide à le repérer. */
+.badge { display: inline-block; padding: .05rem .45rem; font-size: .8rem; font-weight: 600; border: 1px solid; border-radius: 4px; }
+.badge.urgent { color: var(--erreur); background: var(--fond-erreur); border-color: var(--bord-erreur); }
+.badge.attention { color: var(--attention); background: var(--fond-attention); border-color: var(--bord-attention); }
+
+/* Dans une carte, les chiffres clés se serrent avant de s'empiler. */
+.carte .tuiles { grid-template-columns: repeat(auto-fit, minmax(min(100%, 7rem), 1fr)); }
