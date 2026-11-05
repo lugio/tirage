@@ -2,7 +2,8 @@
 
 ## [Non publié]
 ### Ajouté
-- Interface : état de la collecte (dernier travail reçu par collecteur, avertissement s'il est muet en heures ouvrées) ; activité par jour et par heure, globale ou par copieur, jamais par personne ; rapport par application ; gros travaux par copieur. Activité et gros travaux d'un copieur ne s'affichent qu'à partir de trois personnes sur la période. Réglages `gros_travail_pages`, `collecte_silence_minutes`, `heure_ouverture`, `heure_fermeture`.
+- Interface : page Tarifs, prix par page N&B et couleur, général ou par copieur, gardés en base, inscrits au journal ; ils priment sur `[couts]`.
+- Interface : état de la collecte (dernier travail reçu par collecteur, avertissement s'il est muet en heures ouvrées) ; activité par jour et par heure, globale ou par copieur, jamais par personne ; rapport par application ; gros travaux par copieur. Seuls les travaux en couleur sont signalés comme gros. Réglages `gros_travail_couleur_pages`, `collecte_silence_minutes`, `heure_ouverture`, `heure_fermeture`.
 - Interface : page Copieurs alimentée par les travaux (activité, personnes, non imprimés, dernier travail), sans attendre le relevé SNMP ; raccourcis de période ; comparaison à la période précédente et feuilles évitées par le recto-verso ; vue d'un service, d'un cabinet ou d'un copieur, journalisée ; fiche d'une personne avec ses totaux, son évolution, ses copieurs, et durée, taille, résolution et orientation de chaque travail.
 - Squelette de l'espace Cargo (modèle, file d'attente, collecteur, serveur), CI, politique de dépendances, ADR 0001-0002.
 - Format d'échange v1 (`tirage-modele`) : travail d'impression, relevé de copieur, enveloppe versionnée, politique du nom de document (non / application / complet) et déduction de l'application d'origine.

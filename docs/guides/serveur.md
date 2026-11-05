@@ -30,8 +30,12 @@ quelques secondes, pendant lesquelles la réception attend.
 
 | Réglage | Par défaut | Rôle |
 |---|---|---|
-| `gros_travail_pages` | 100 | Un travail compte comme gros à partir de ce nombre de pages, copies comprises. |
+| `gros_travail_couleur_pages` | 100 | Un travail en couleur est signalé à partir de ce nombre de pages, copies comprises. Un travail N&B ne l'est jamais. |
 | `collecte_silence_minutes` | 120 | Temps ouvré sans travail reçu au bout duquel la collecte est signalée comme muette. |
 | `heure_ouverture`, `heure_fermeture` | 8, 18 | Heures ouvrées, du lundi au vendredi, dans le fuseau configuré. Les jours fériés ne sont pas connus : l'avertissement peut alors être faux. |
 
-L'activité par heure et les gros travaux d'un copieur ne s'affichent qu'à partir de trois personnes sur la période : en dessous, ils décriraient une personne. Ils ne sont jamais restitués par personne ni par service.
+L'activité par heure et les gros travaux sont restitués par copieur, jamais par personne ni par service. Sur un copieur utilisé par une seule personne, ces chiffres la décrivent : à prendre en compte dans l'information des personnes.
+
+## Tarifs
+
+La page **Tarifs** de l'interface donne le prix d'une page, N&B et couleur, en général et par copieur. Un copieur sans prix propre prend le prix général. Une fois enregistrés, ces prix sont gardés en base et priment sur `[couts]` de la configuration, qui ne donne plus que la devise. Les coûts sont recalculés avec les prix actuels sur toutes les périodes, passées comprises. Chaque modification est inscrite au journal.

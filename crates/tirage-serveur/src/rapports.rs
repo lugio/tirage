@@ -390,8 +390,8 @@ mod tests {
             couleur: Some(0.1),
             files: vec![TarifFile {
                 file: "CHER".into(),
-                noir: 0.02,
-                couleur: 0.2,
+                noir: Some(0.02),
+                couleur: Some(0.2),
             }],
         }
     }

@@ -5,6 +5,7 @@
 
 use std::path::Path;
 
+use crate::config::{ConfigCouts, TarifFile};
 use rusqlite::{Connection, OptionalExtension, params};
 use tirage_modele::{Evenement, ReleveCopieur, Travail};
 
@@ -86,6 +87,12 @@ const MIGRATIONS: &[&str] = &[
         pages       INTEGER NOT NULL,
         feuilles    INTEGER NOT NULL,
         PRIMARY KEY (mois, service, cabinet, file, couleur, recto_verso, format)
+     );",
+    // 4 — prix saisis dans l'interface ; la ligne de file vide porte le tarif général et prime sur la configuration
+    "CREATE TABLE tarifs (
+        file    TEXT PRIMARY KEY COLLATE NOCASE,
+        noir    REAL,
+        couleur REAL
      );",
 ];
 
@@ -186,7 +193,7 @@ pub struct ActiviteCopieur {
     pub dernier_ms: i64,
     pub non_imprimes: i64,
     pub personnes: i64,
-    /// Travaux imprimés d'au moins le seuil demandé, et leurs pages.
+    /// Travaux couleur imprimés d'au moins le seuil demandé, et leurs pages.
     pub gros_travaux: i64,
     pub gros_pages: i64,
 }
@@ -398,16 +405,17 @@ impl Base {
         &self,
         du_ms: i64,
         au_ms: i64,
-        gros_pages: i64,
+        seuil_couleur: i64,
     ) -> rusqlite::Result<Vec<ActiviteCopieur>> {
         let mut s = self.conn.prepare(
             "SELECT file, max(envoye_ms), sum(statut <> 'imprime'), count(DISTINCT utilisateur COLLATE NOCASE),
-                sum(statut = 'imprime' AND pages_totales >= ?3),
-                sum(CASE WHEN statut = 'imprime' AND pages_totales >= ?3 THEN pages_totales ELSE 0 END)
+                sum(statut = 'imprime' AND couleur = 'couleur' AND pages_totales >= ?3),
+                sum(CASE WHEN statut = 'imprime' AND couleur = 'couleur' AND pages_totales >= ?3
+                    THEN pages_totales ELSE 0 END)
              FROM travaux WHERE envoye_ms >= ?1 AND envoye_ms < ?2
              GROUP BY file COLLATE NOCASE ORDER BY file",
         )?;
-        s.query_map([du_ms, au_ms, gros_pages], |r| {
+        s.query_map([du_ms, au_ms, seuil_couleur], |r| {
             Ok(ActiviteCopieur {
                 file: r.get(0)?,
                 dernier_ms: r.get(1)?,
@@ -418,6 +426,65 @@ impl Base {
             })
         })?
         .collect()
+    }
+
+    /// Tarifs en vigueur : ceux de l'interface s'ils ont été enregistrés une fois, sinon ceux de la configuration.
+    pub fn tarifs(&self, defaut: &ConfigCouts) -> rusqlite::Result<ConfigCouts> {
+        let mut s = self
+            .conn
+            .prepare("SELECT file, noir, couleur FROM tarifs ORDER BY file COLLATE NOCASE")?;
+        let lignes = s
+            .query_map([], |r| {
+                Ok(TarifFile {
+                    file: r.get(0)?,
+                    noir: r.get(1)?,
+                    couleur: r.get(2)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let Some((general, files)) = lignes.split_first().filter(|(g, _)| g.file.is_empty()) else {
+            return Ok(defaut.clone());
+        };
+        Ok(ConfigCouts {
+            devise: defaut.devise.clone(),
+            noir: general.noir,
+            couleur: general.couleur,
+            files: files.to_vec(),
+        })
+    }
+
+    /// Remplace tous les tarifs et l'inscrit au journal, d'un bloc : sans trace, pas de modification.
+    pub fn remplacer_tarifs(
+        &self,
+        c: &ConfigCouts,
+        quand_ms: i64,
+        lecteur: &str,
+        cible: &str,
+    ) -> rusqlite::Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        self.consigner(quand_ms, lecteur, "tarifs_modifies", Some(cible))?;
+        tx.execute("DELETE FROM tarifs", [])?;
+        let mut s = tx.prepare("INSERT INTO tarifs (file, noir, couleur) VALUES (?1, ?2, ?3)")?;
+        s.execute(params!["", c.noir, c.couleur])?;
+        for f in &c.files {
+            s.execute(params![f.file, f.noir, f.couleur])?;
+        }
+        drop(s);
+        tx.commit()
+    }
+
+    /// Files vues dans le détail, les totaux archivés ou les tarifs, une seule fois quelle que soit la casse.
+    pub fn files_connues(&self) -> rusqlite::Result<Vec<String>> {
+        let mut s = self.conn.prepare(
+            "SELECT file FROM travaux UNION SELECT file FROM totaux_mensuels
+             UNION SELECT file FROM tarifs WHERE file <> ''
+             ORDER BY 1 COLLATE NOCASE",
+        )?;
+        let mut files = s
+            .query_map([], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        files.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+        Ok(files)
     }
 
     /// Pages archivées des mois `[premier, dernier]` (« AAAA-MM »), par mois et mode couleur.
@@ -916,6 +983,7 @@ pub(crate) mod tests {
             t.utilisateur = u.into();
             t.statut = statut;
             t.envoye_ms = ms;
+            t.couleur = ModeCouleur::Couleur;
             b.enregistrer(&Evenement::Travail(t), 0).unwrap();
         };
         ajouter(1, "a.exemple", Statut::Imprime, 10);
@@ -929,6 +997,82 @@ pub(crate) mod tests {
         assert!(a[0].gros_pages > 0);
         assert_eq!(b.activite_copieurs(0, 100, 1_000_000).unwrap()[0].gros_travaux, 0);
         assert!(b.activite_copieurs(0, 10, 1).unwrap().is_empty());
+    }
+
+    #[test]
+    fn un_gros_travail_est_forcement_en_couleur() {
+        let mut b = Base::en_memoire().unwrap();
+        let mut t = travail(1);
+        t.couleur = ModeCouleur::NoirEtBlanc;
+        t.pages = 500;
+        t.envoye_ms = 10;
+        b.enregistrer(&Evenement::Travail(t), 0).unwrap();
+        let a = b.activite_copieurs(0, 100, 1).unwrap();
+        assert_eq!((a[0].gros_travaux, a[0].gros_pages), (0, 0));
+    }
+
+    #[test]
+    fn tarifs_de_l_interface_ou_de_la_configuration() {
+        let b = Base::en_memoire().unwrap();
+        let defaut = ConfigCouts {
+            noir: Some(0.5),
+            ..ConfigCouts::default()
+        };
+        assert_eq!(b.tarifs(&defaut).unwrap(), defaut);
+        let saisis = ConfigCouts {
+            devise: defaut.devise.clone(),
+            noir: None,
+            couleur: Some(0.1),
+            files: vec![TarifFile {
+                file: "F-1".into(),
+                noir: Some(0.02),
+                couleur: None,
+            }],
+        };
+        b.remplacer_tarifs(&saisis, 1, "lecteur", "x").unwrap();
+        // Une fois enregistrés, ils priment, même vides : le prix noir de la configuration ne revient pas.
+        assert_eq!(b.tarifs(&defaut).unwrap(), saisis);
+        assert_eq!(b.tarifs(&defaut).unwrap().prix("f-1", false), Some(2000));
+        assert_eq!(b.tarifs(&defaut).unwrap().prix("f-1", true), Some(10_000));
+        assert_eq!(b.tarifs(&defaut).unwrap().prix("autre", false), None);
+        assert_eq!(b.consultations(1).unwrap()[0].action, "tarifs_modifies");
+    }
+
+    #[test]
+    fn sans_journal_les_tarifs_ne_changent_pas() {
+        let b = Base::en_memoire().unwrap();
+        b.conn.execute_batch("DROP TABLE consultations").unwrap();
+        let defaut = ConfigCouts::default();
+        let saisis = ConfigCouts {
+            noir: Some(0.1),
+            ..ConfigCouts::default()
+        };
+        assert!(b.remplacer_tarifs(&saisis, 1, "lecteur", "x").is_err());
+        assert_eq!(b.tarifs(&defaut).unwrap(), defaut);
+    }
+
+    #[test]
+    fn files_connues_sans_doublon_de_casse() {
+        let mut b = Base::en_memoire().unwrap();
+        for (n, f) in [(1, "COPIEUR"), (2, "copieur"), (3, "autre")] {
+            let mut t = travail(n);
+            t.file = f.into();
+            b.enregistrer(&Evenement::Travail(t), 0).unwrap();
+        }
+        let tarif = ConfigCouts {
+            files: vec![TarifFile {
+                file: "retire".into(),
+                noir: Some(0.1),
+                couleur: None,
+            }],
+            ..ConfigCouts::default()
+        };
+        b.remplacer_tarifs(&tarif, 1, "lecteur", "x").unwrap();
+        let f = b.files_connues().unwrap();
+        assert_eq!(f.len(), 3, "{f:?}");
+        assert!(
+            f[0].eq_ignore_ascii_case("autre") && f[1].eq_ignore_ascii_case("copieur") && f[2] == "retire"
+        );
     }
 
     #[test]

@@ -11,7 +11,7 @@
 mod gabarit;
 mod graphique;
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use axum::Router;
 use axum::extract::{DefaultBodyLimit, Extension, Form, Path, Query, Request, State};
@@ -26,7 +26,7 @@ use serde::Deserialize;
 
 use crate::annuaire::{Annuaire, ErreurAuth, identifiant_nu};
 use crate::base::{ActiviteCopieur, Base, Filtre};
-use crate::config::{ConfigCouts, ConfigInterface};
+use crate::config::{ConfigCouts, ConfigInterface, TarifFile};
 use crate::conservation::limite_ms;
 use crate::rapports::{self, Axe, Ligne, Tranche};
 use crate::session::{Limiteur, Session, Sessions};
@@ -63,8 +63,6 @@ const SERIES: [Serie; 3] = [SERIE_NOIR, SERIE_COULEUR, SERIE_INCONNU];
 const APERCU_TAILLE: usize = 5;
 
 const PALMARES_TAILLE: usize = 10;
-/// En dessous, l'activité horaire et les gros travaux d'un copieur décriraient une personne : ils ne s'affichent pas.
-const PERSONNES_MIN_COPIEUR: i64 = 3;
 /// Une réception plus ancienne ne compte plus : un collecteur retiré finit par sortir de l'état de la collecte.
 const COLLECTE_JOURS: i64 = 30;
 const JOURS_SEMAINE: [&str; 7] = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
@@ -75,9 +73,9 @@ pub struct Interface {
     limiteur: Limiteur,
     cookie_securise: bool,
     fuseau: TimeZone,
-    couts: ConfigCouts,
+    couts: RwLock<ConfigCouts>,
     detail_mois: u32,
-    gros_travail_pages: u32,
+    gros_travail_couleur_pages: u32,
     collecte_silence_minutes: u32,
     heures_ouvrees: (u8, u8),
 }
@@ -96,11 +94,26 @@ impl Interface {
             cookie_securise: !c.http_en_clair,
             // La configuration a déjà validé le nom du fuseau.
             fuseau: TimeZone::get(&c.fuseau).unwrap_or(TimeZone::UTC),
-            couts,
+            couts: RwLock::new(couts),
             detail_mois,
-            gros_travail_pages: c.gros_travail_pages,
+            gros_travail_couleur_pages: c.gros_travail_couleur_pages,
             collecte_silence_minutes: c.collecte_silence_minutes,
             heures_ouvrees: (c.heure_ouverture, c.heure_fermeture),
+        }
+    }
+
+    /// Tarifs en vigueur : la page Tarifs peut les changer à tout moment.
+    fn couts(&self) -> ConfigCouts {
+        match self.couts.read() {
+            Ok(c) => c.clone(),
+            Err(e) => e.into_inner().clone(),
+        }
+    }
+
+    fn changer_couts(&self, c: ConfigCouts) {
+        match self.couts.write() {
+            Ok(mut g) => *g = c,
+            Err(e) => *e.into_inner() = c,
         }
     }
 
@@ -228,6 +241,7 @@ pub fn routes<S: Clone + Send + Sync + 'static>(c: Contexte) -> Router<S> {
         .route("/services/{service}", get(vue_service))
         .route("/cabinets/{cabinet}", get(vue_cabinet))
         .route("/utilisateurs/{utilisateur}", get(detail))
+        .route("/tarifs", get(tarifs).post(enregistrer_tarifs))
         .route("/journal", get(journal))
         .route("/deconnexion", post(deconnexion))
         .route_layer(middleware::from_fn_with_state(c.clone(), exiger_session));
@@ -552,7 +566,7 @@ async fn lire_rapports(
             if let Some((premier, dernier)) = &mois {
                 brutes.extend(b.totaux_archives(axe, premier, dernier)?);
             }
-            lignes.push(rapports::construire(&brutes, &interface.couts));
+            lignes.push(rapports::construire(&brutes, &interface.couts()));
         }
         Ok((lignes, b.non_imprimes(du, au)?))
     })
@@ -582,7 +596,7 @@ fn note_sur_le_calcul(total: &Ligne, non_imprimes: i64, devise: &str) -> String 
     }
     if total.sans_tarif > 0 {
         n += &format!(
-            " {} pages sans tarif ne sont pas dans le coût : il est donc incomplet ({devise}).",
+            " {} pages sans tarif ne sont pas dans le coût : il est donc incomplet ({devise}). Les prix se saisissent dans la page Tarifs.",
             entier(total.sans_tarif)
         );
     }
@@ -649,14 +663,14 @@ async fn accueil(
     let maintenant = (c.horloge)();
     let mut h = i.etat_collecte(&receptions, maintenant);
     h.push_str(&i.selecteur(&periode, "/", maintenant));
-    h.push_str(&tuiles_de(&t, &i.couts.devise));
+    h.push_str(&tuiles_de(&t, &i.couts().devise));
     if let Some(precedente) = i.periode_precedente(&periode, maintenant) {
         match lire_total(&c, &precedente).await {
             Ok(avant) => h.push_str(&comparaison(&t, &avant, &precedente)),
             Err(rep) => return *rep,
         }
     }
-    h.push_str(&note_sur_le_calcul(&t, non_imprimes, &i.couts.devise));
+    h.push_str(&note_sur_le_calcul(&t, non_imprimes, &i.couts().devise));
     h.push_str(&i.avis_conservation(&periode, (c.horloge)()));
     h.push_str(&carte(
         "Pages imprimées dans le temps",
@@ -697,7 +711,10 @@ async fn lire_total(c: &Contexte, p: &Periode) -> Result<Ligne, Box<Response>> {
         if let Some((premier, dernier)) = &mois {
             brutes.extend(b.totaux_archives(Axe::Service, premier, dernier)?);
         }
-        Ok(rapports::total(&rapports::construire(&brutes, &interface.couts)))
+        Ok(rapports::total(&rapports::construire(
+            &brutes,
+            &interface.couts(),
+        )))
     })
     .await
 }
@@ -902,7 +919,7 @@ async fn rapport(
     let t = rapports::total(lignes);
     let mut h = i.selecteur(&periode, &format!("/rapports/{}", axe.chemin()), (c.horloge)());
     h.push_str(&onglets_rapports(&periode, Some(axe)));
-    h.push_str(&note_sur_le_calcul(&t, non_imprimes, &i.couts.devise));
+    h.push_str(&note_sur_le_calcul(&t, non_imprimes, &i.couts().devise));
     if axe == Axe::Application {
         h.push_str(&note(
             "L'application est déduite du titre du document : elle reste inconnue quand le titre ne la dit pas. \
@@ -917,7 +934,7 @@ async fn rapport(
         entier,
         PALMARES_TAILLE,
     ));
-    h.push_str(&tableau_axe(axe, lignes, &t, &i.couts.devise, &periode));
+    h.push_str(&tableau_axe(axe, lignes, &t, &i.couts().devise, &periode));
     h.push_str(&bouton_lien(
         &format!("/rapports/{}/csv?{}", axe.chemin(), periode.requete()),
         "Exporter en CSV",
@@ -1061,36 +1078,28 @@ async fn vue_copieur(
     vue(c, s, Vue::Copieur, valeur, d).await
 }
 
-/// Vrai si le copieur est assez partagé pour que son activité ne décrive pas une personne.
-fn assez_de_personnes(a: &ActiviteCopieur) -> bool {
-    a.personnes >= PERSONNES_MIN_COPIEUR
-}
-
-/// Activité horaire et gros travaux d'un copieur, sans nom, à partir de quelques personnes sur la période.
-fn bloc_copieur_anonyme(
+/// Activité horaire du copieur, et ses gros travaux couleur s'il y en a.
+fn bloc_copieur(
     i: &Interface,
-    activite: Option<&ActiviteCopieur>,
+    activite: &ActiviteCopieur,
     t: &Ligne,
     temps: &[(i64, String, i64)],
 ) -> String {
-    let Some(a) = activite.filter(|a| assez_de_personnes(a)) else {
-        return note(&format!(
-            "Activité par heure et gros travaux : affichés à partir de {PERSONNES_MIN_COPIEUR} personnes sur la période, \
-             pour ne décrire personne en particulier."
+    let mut h = carte("Activité par jour et par heure", &bloc_activite(temps, &i.fuseau));
+    if activite.gros_travaux > 0 {
+        let gros = format!(
+            "Travaux couleur d'au moins {} pages : {}, soit {} pages et {} des pages du copieur.",
+            entier(i64::from(i.gros_travail_couleur_pages)),
+            entier(activite.gros_travaux),
+            entier(activite.gros_pages),
+            pourcentage(activite.gros_pages, t.pages)
+        );
+        h.push_str(&carte(
+            "Gros travaux couleur",
+            &format!("<p>{}</p>", echapper(&gros)),
         ));
-    };
-    let gros = format!(
-        "Travaux d'au moins {} pages : {}, soit {} pages et {} des pages du copieur.",
-        entier(i64::from(i.gros_travail_pages)),
-        entier(a.gros_travaux),
-        entier(a.gros_pages),
-        pourcentage(a.gros_pages, t.pages)
-    );
-    format!(
-        "{}{}",
-        carte("Activité par jour et par heure", &bloc_activite(temps, &i.fuseau)),
-        carte("Gros travaux", &format!("<p>{}</p>", echapper(&gros)))
-    )
+    }
+    h
 }
 
 /// Détail seul : les totaux archivés, sans nom, ne se découpent pas par personne.
@@ -1118,15 +1127,15 @@ async fn vue(c: Contexte, s: Session, vue: Vue, valeur: String, d: Demande) -> R
         let lignes2 = b.agreger_filtre(axe2, du, au, filtre)?;
         let temps = b.pages_dans_le_temps_filtre(du, au, filtre)?;
         let activite = if vue == Vue::Copieur {
-            b.activite_copieurs(du, au, i64::from(interface.gros_travail_pages))?
+            b.activite_copieurs(du, au, i64::from(interface.gros_travail_couleur_pages))?
                 .into_iter()
                 .find(|a| a.file.eq_ignore_ascii_case(&valeur_lue))
         } else {
             None
         };
         Ok((
-            rapports::construire(&lignes1, &interface.couts),
-            rapports::construire(&lignes2, &interface.couts),
+            rapports::construire(&lignes1, &interface.couts()),
+            rapports::construire(&lignes2, &interface.couts()),
             temps,
             activite,
         ))
@@ -1140,7 +1149,7 @@ async fn vue(c: Contexte, s: Session, vue: Vue, valeur: String, d: Demande) -> R
     let (axe1, axe2) = vue.axes();
     let tranches = rapports::evolution(periode.du, periode.au, &i.fuseau, &temps, &[]);
     let mut h = i.selecteur(&periode, &action, maintenant);
-    h.push_str(&tuiles_de(&t, &i.couts.devise));
+    h.push_str(&tuiles_de(&t, &i.couts().devise));
     h.push_str(&note(
         "Seuls les travaux imprimés encore en détail sont comptés. Consultation inscrite au journal.",
     ));
@@ -1149,8 +1158,8 @@ async fn vue(c: Contexte, s: Session, vue: Vue, valeur: String, d: Demande) -> R
         "Pages imprimées dans le temps",
         &bloc_evolution(&tranches),
     ));
-    if vue == Vue::Copieur {
-        h.push_str(&bloc_copieur_anonyme(&i, activite.as_ref(), &t, &temps));
+    if let Some(a) = &activite {
+        h.push_str(&bloc_copieur(&i, a, &t, &temps));
     }
     h.push_str("<div class=\"grille\">");
     h.push_str(&carte("Couleur et recto-verso", &bloc_modes(&t)));
@@ -1162,7 +1171,7 @@ async fn vue(c: Contexte, s: Session, vue: Vue, valeur: String, d: Demande) -> R
         PALMARES_TAILLE,
     ));
     h.push_str("</div>");
-    h.push_str(&tableau_axe(axe1, &lignes1, &t, &i.couts.devise, &periode));
+    h.push_str(&tableau_axe(axe1, &lignes1, &t, &i.couts().devise, &periode));
     let rubrique = if vue == Vue::Copieur {
         Rubrique::Copieurs
     } else {
@@ -1199,7 +1208,7 @@ async fn export_csv(
     let corps = rapports::csv(
         axe,
         lignes.first().map_or(&[][..], Vec::as_slice),
-        &i.couts.devise,
+        &i.couts().devise,
     );
     let nom = format!(
         "attachment; filename=\"tirage-{}-{}-{}.csv\"",
@@ -1292,7 +1301,7 @@ fn tableau_activite(
         Colonne::nombre("Feuilles"),
         Colonne::nombre("Personnes"),
         Colonne::nombre("Non imprimés"),
-        Colonne::nombre("Gros travaux"),
+        Colonne::nombre("Gros travaux couleur"),
         Colonne::texte("Dernier travail"),
     ]);
     let cherche = |file: &str| activite.iter().find(|a| a.file.eq_ignore_ascii_case(file));
@@ -1314,10 +1323,7 @@ fn tableau_activite(
             Cellule::Nombre(entier(l.feuilles)),
             Cellule::Nombre(a.map_or("—".to_owned(), |a| entier(a.personnes))),
             Cellule::Nombre(a.map_or("—".to_owned(), |a| entier(a.non_imprimes))),
-            Cellule::Nombre(
-                a.filter(|a| assez_de_personnes(a))
-                    .map_or("—".to_owned(), |a| entier(a.gros_travaux)),
-            ),
+            Cellule::Nombre(a.map_or("—".to_owned(), |a| entier(a.gros_travaux))),
             Cellule::Texte(a.map_or(String::new(), |a| i.heure(a.dernier_ms))),
         ]);
     }
@@ -1341,7 +1347,11 @@ async fn copieurs(
         Err(rep) => return *rep,
     };
     let lignes = lignes.first().map_or(&[][..], Vec::as_slice);
-    let (du, au, seuil) = (periode.du_ms, periode.au_ms, i64::from(i.gros_travail_pages));
+    let (du, au, seuil) = (
+        periode.du_ms,
+        periode.au_ms,
+        i64::from(i.gros_travail_couleur_pages),
+    );
     let lu = avec_base(&c.base, move |b| {
         Ok((b.activite_copieurs(du, au, seuil)?, b.derniers_releves()?))
     })
@@ -1357,7 +1367,7 @@ async fn copieurs(
     let t = rapports::total(lignes);
     let mut h = i.etat_collecte(&receptions, maintenant);
     h.push_str(&i.selecteur(&periode, "/copieurs", maintenant));
-    h.push_str(&note_sur_le_calcul(&t, non_imprimes, &i.couts.devise));
+    h.push_str(&note_sur_le_calcul(&t, non_imprimes, &i.couts().devise));
     h.push_str(&i.avis_conservation(&periode, maintenant));
     h.push_str("<h2>Activité</h2>");
     h.push_str(&liste_palmares(
@@ -1369,8 +1379,7 @@ async fn copieurs(
     ));
     h.push_str(&tableau_activite(&i, lignes, &activite, &periode));
     h.push_str(&note(&format!(
-        "Gros travaux : au moins {} pages, copies comprises. Affichés à partir de {PERSONNES_MIN_COPIEUR} personnes \
-         sur la période, pour ne décrire personne en particulier.",
+        "Gros travaux couleur : travaux en couleur d'au moins {} pages, copies comprises.",
         entier(seuil)
     )));
     h.push_str("<h2>État relevé</h2>");
@@ -1411,6 +1420,205 @@ async fn copieurs(
     }
     h.push_str(&tableau.fin_ou("Aucun relevé reçu : le relevé SNMP des copieurs n'est pas encore actif."));
     Html(page(Rubrique::Copieurs, "Copieurs", &h, Some(&s))).into_response()
+}
+
+/// Ce qui est affiché dans le formulaire des tarifs : les prix enregistrés, ou la saisie à corriger.
+struct SaisieTarifs {
+    noir: String,
+    couleur: String,
+    /// Une ligne par copieur : nom, prix N&B, prix couleur.
+    files: Vec<(String, String, String)>,
+}
+
+fn texte_prix(p: Option<f64>) -> String {
+    p.map_or(String::new(), |x| x.to_string().replace('.', ","))
+}
+
+/// Prix saisi, virgule ou point, arrondi à la précision des calculs. Vide : pas de prix.
+fn lire_prix(quoi: &str, v: &str) -> Result<Option<f64>, String> {
+    let v = v.trim();
+    if v.is_empty() {
+        return Ok(None);
+    }
+    match v.replace(',', ".").parse::<f64>() {
+        Ok(x) if ConfigCouts::prix_correct(x) => Ok(Some((x * 100_000.0).round() / 100_000.0)),
+        _ => Err(format!(
+            "{quoi} : un prix est un nombre entre 0 et 1000, par exemple 0,012."
+        )),
+    }
+}
+
+impl SaisieTarifs {
+    fn des_couts(c: &ConfigCouts, files: &[String]) -> Self {
+        SaisieTarifs {
+            noir: texte_prix(c.noir),
+            couleur: texte_prix(c.couleur),
+            files: files
+                .iter()
+                .map(|f| {
+                    let t = c.files.iter().find(|t| t.file.eq_ignore_ascii_case(f));
+                    (
+                        f.clone(),
+                        texte_prix(t.and_then(|t| t.noir)),
+                        texte_prix(t.and_then(|t| t.couleur)),
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    /// Lit le formulaire. Un champ inconnu est refusé : il ne viendrait pas de cette page.
+    fn du_formulaire(champs: &[(String, String)], files: &[String]) -> Result<Self, String> {
+        let mut s = SaisieTarifs::des_couts(&ConfigCouts::default(), files);
+        for (nom, valeur) in champs {
+            let cible = match nom.split_once(':') {
+                None if nom == "noir" => Some(&mut s.noir),
+                None if nom == "couleur" => Some(&mut s.couleur),
+                Some((mode, file)) => s.files.iter_mut().find(|l| l.0 == file).and_then(|l| match mode {
+                    "noir" => Some(&mut l.1),
+                    "couleur" => Some(&mut l.2),
+                    _ => None,
+                }),
+                None => None,
+            };
+            match cible {
+                Some(c) => valeur.clone_into(c),
+                None => return Err("Formulaire des tarifs non reconnu : recharger la page.".to_owned()),
+            }
+        }
+        Ok(s)
+    }
+
+    fn en_couts(&self, devise: &str) -> Result<ConfigCouts, String> {
+        let mut couts = ConfigCouts {
+            devise: devise.to_owned(),
+            noir: lire_prix("Prix général N&B", &self.noir)?,
+            couleur: lire_prix("Prix général couleur", &self.couleur)?,
+            files: Vec::new(),
+        };
+        for (file, noir, couleur) in &self.files {
+            let tarif = TarifFile {
+                file: file.clone(),
+                noir: lire_prix(&format!("{file}, N&B"), noir)?,
+                couleur: lire_prix(&format!("{file}, couleur"), couleur)?,
+            };
+            if tarif.noir.is_some() || tarif.couleur.is_some() {
+                couts.files.push(tarif);
+            }
+        }
+        Ok(couts)
+    }
+
+    fn page(&self, devise: &str, message: &str, s: &Session) -> String {
+        let champ = |nom: &str, valeur: &str, etiquette: &str| {
+            format!(
+                "<input name=\"{}\" value=\"{}\" inputmode=\"decimal\" maxlength=\"12\" autocomplete=\"off\" aria-label=\"{}\">",
+                echapper(nom),
+                echapper(valeur),
+                echapper(etiquette)
+            )
+        };
+        let general = format!(
+            "<div class=\"prix-general\"><label>N&amp;B {}</label><label>Couleur {}</label></div>",
+            champ("noir", &self.noir, "Prix général N&B"),
+            champ("couleur", &self.couleur, "Prix général couleur"),
+        );
+        let mut tableau = Tableau::nouveau(&[
+            Colonne::texte("Copieur"),
+            Colonne::texte("N&B"),
+            Colonne::texte("Couleur"),
+        ]);
+        for (file, noir, couleur) in &self.files {
+            tableau.ligne([
+                Cellule::texte(file),
+                Cellule::Html(champ(&format!("noir:{file}"), noir, &format!("{file}, prix N&B"))),
+                Cellule::Html(champ(
+                    &format!("couleur:{file}"),
+                    couleur,
+                    &format!("{file}, prix couleur"),
+                )),
+            ]);
+        }
+        let corps = format!(
+            "{message}{}<form method=\"post\" action=\"/tarifs\" class=\"tarifs\">{}{}<button>Enregistrer</button></form>",
+            note(&format!(
+                "Prix d'une page, en {devise}. Un copieur sans prix propre prend le prix général. Les coûts sont recalculés \
+                 avec ces prix sur toutes les périodes, passées comprises. Un mode couleur inconnu est compté au prix N&B."
+            )),
+            carte("Prix général", &general),
+            carte(
+                "Prix par copieur",
+                &tableau.fin_ou("Aucun copieur connu : aucun travail reçu pour l'instant."),
+            ),
+        );
+        page(Rubrique::Tarifs, "Tarifs", &corps, Some(s))
+    }
+}
+
+#[derive(Deserialize)]
+struct AvisTarifs {
+    enregistre: Option<String>,
+}
+
+async fn tarifs(
+    State(c): State<Contexte>,
+    Extension(s): Extension<Session>,
+    Query(avis): Query<AvisTarifs>,
+) -> Response {
+    let files = match avec_base(&c.base, Base::files_connues).await {
+        Ok(f) => f,
+        Err(rep) => return *rep,
+    };
+    let couts = c.interface.couts();
+    let message = if avis.enregistre.is_some() {
+        note("Tarifs enregistrés.")
+    } else {
+        String::new()
+    };
+    Html(SaisieTarifs::des_couts(&couts, &files).page(&couts.devise, &message, &s)).into_response()
+}
+
+/// Tout ou rien : une seule valeur fausse et rien n'est enregistré ; le changement est inscrit au journal.
+async fn enregistrer_tarifs(
+    State(c): State<Contexte>,
+    Extension(s): Extension<Session>,
+    Form(champs): Form<Vec<(String, String)>>,
+) -> Response {
+    let files = match avec_base(&c.base, Base::files_connues).await {
+        Ok(f) => f,
+        Err(rep) => return *rep,
+    };
+    let saisie = match SaisieTarifs::du_formulaire(&champs, &files) {
+        Ok(v) => v,
+        Err(m) => return demande_invalide(&m, Some(&s)),
+    };
+    let devise = c.interface.couts().devise;
+    let couts = match saisie.en_couts(&devise) {
+        Ok(v) => v,
+        Err(m) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Html(saisie.page(&devise, &erreur(&m), &s)),
+            )
+                .into_response();
+        }
+    };
+    let cible = format!(
+        "général N&B {}, couleur {} ; {} copieur(s) à prix propre",
+        texte_prix(couts.noir),
+        texte_prix(couts.couleur),
+        couts.files.len()
+    );
+    let (a_ecrire, lecteur, maintenant) = (couts.clone(), s.login.clone(), (c.horloge)());
+    let ecrit = avec_base(&c.base, move |b| {
+        b.remplacer_tarifs(&a_ecrire, maintenant, &lecteur, &cible)
+    })
+    .await;
+    if let Err(rep) = ecrit {
+        return *rep;
+    }
+    c.interface.changer_couts(couts);
+    Redirect::to("/tarifs?enregistre=1").into_response()
 }
 
 /// Libellés lisibles des valeurs du spouleur ; une valeur inconnue reste telle quelle.
@@ -1463,7 +1671,7 @@ async fn detail(
         Ok((
             b.personne(&cible)?,
             b.travaux_de(&cible, du, au, LIGNES_DETAIL)?,
-            rapports::construire(&par_copieur, &interface.couts),
+            rapports::construire(&par_copieur, &interface.couts()),
             b.pages_dans_le_temps_filtre(du, au, filtre)?,
         ))
     })
@@ -1488,7 +1696,7 @@ async fn detail(
         &format!("/utilisateurs/{}", encoder_chemin(&utilisateur)),
         maintenant,
     ));
-    h.push_str(&tuiles_de(&t, &i.couts.devise));
+    h.push_str(&tuiles_de(&t, &i.couts().devise));
     h.push_str(&note(
         "Seuls les travaux imprimés sont comptés dans les chiffres ; la liste les montre tous. Consultation inscrite au journal.",
     ));
@@ -1769,6 +1977,7 @@ mod tests {
             "/palmares",
             "/copieurs",
             "/copieurs/COPIEUR-1",
+            "/tarifs",
             "/services/Audit",
             "/cabinets/Est",
             "/rapports/service",
@@ -2346,6 +2555,12 @@ mod tests {
             t.copies = 1;
             t.application = app.map(str::to_owned);
             t.envoye_ms = DEBUT_NOVEMBRE + i64::from(n);
+            // Le gros travail de COPIEUR-1 est en couleur, celui de COPIEUR-2 en N&B.
+            t.couleur = if n == 1 {
+                ModeCouleur::Couleur
+            } else {
+                ModeCouleur::NoirEtBlanc
+            };
             base.enregistrer(&Evenement::Travail(t), recu_ms).unwrap();
         };
         ajouter(1, "a.exemple", "COPIEUR-1", 250, Some("Tableur"));
@@ -2389,7 +2604,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn activite_horaire_seulement_global_et_copieur_partage() {
+    async fn activite_horaire_globale_et_par_copieur_jamais_par_personne() {
         let b = banc();
         charger_partage(&b, MAINTENANT);
         let cookie = b.connecter().await;
@@ -2400,20 +2615,15 @@ mod tests {
             "{}",
             r.texte
         );
-        // Copieur partagé : affichée.
+        // Par copieur, même utilisé par une seule personne (décision du responsable : pas de masquage).
         let r = b
             .get(&format!("/copieurs/COPIEUR-1?{NOVEMBRE}"), Some(&cookie))
             .await;
         assert!(r.texte.contains(titre), "{}", r.texte);
-        // Copieur d'une seule personne : masquée, comme tout ce qui la décrirait.
         let r = b
             .get(&format!("/copieurs/COPIEUR-2?{NOVEMBRE}"), Some(&cookie))
             .await;
-        assert!(
-            !r.texte.contains(titre) && !r.texte.contains("chaleur"),
-            "{}",
-            r.texte
-        );
+        assert!(r.texte.contains(titre), "{}", r.texte);
         // Jamais pour une personne ni pour un service.
         for chemin in ["/utilisateurs/a.exemple", "/services/Non%20rattach%C3%A9"] {
             let r = b.get(&format!("{chemin}?{NOVEMBRE}"), Some(&cookie)).await;
@@ -2426,7 +2636,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn gros_travaux_par_copieur_seulement() {
+    async fn gros_travaux_en_couleur_seulement_et_par_copieur() {
         let b = banc();
         charger_partage(&b, MAINTENANT);
         let cookie = b.connecter().await;
@@ -2435,25 +2645,140 @@ mod tests {
             .await;
         assert!(
             r.texte
-                .contains("Travaux d&#39;au moins 100 pages : 1, soit 250 pages et 93 % des pages"),
+                .contains("Travaux couleur d&#39;au moins 100 pages : 1, soit 250 pages et 93 % des pages"),
             "{}",
             r.texte
         );
-        // 300 pages, mais une seule personne : aucun chiffre.
+        // 300 pages, mais en N&B : pas de carte.
         let r = b
             .get(&format!("/copieurs/COPIEUR-2?{NOVEMBRE}"), Some(&cookie))
             .await;
-        assert!(!r.texte.contains("Travaux d&#39;au moins"), "{}", r.texte);
+        assert!(!r.texte.contains("Gros travaux couleur"), "{}", r.texte);
         let r = b.get(&format!("/copieurs?{NOVEMBRE}"), Some(&cookie)).await;
-        assert!(
-            r.texte.contains("Gros travaux") && r.texte.contains(">—<"),
-            "{}",
-            r.texte
-        );
+        assert!(r.texte.contains("Gros travaux couleur"), "{}", r.texte);
         for chemin in ["/utilisateurs/a.exemple", "/palmares", "/rapports/utilisateur"] {
             let r = b.get(&format!("{chemin}?{NOVEMBRE}"), Some(&cookie)).await;
             assert!(!r.texte.contains("Gros travaux"), "{chemin}");
         }
+    }
+
+    impl Banc {
+        async fn poster_tarifs(&self, corps: &str, cookie: &str) -> Rep {
+            self.req(
+                axum::http::Request::post("/tarifs")
+                    .header(header::COOKIE, cookie)
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(corps.to_owned()))
+                    .unwrap(),
+            )
+            .await
+        }
+
+        fn tarifs_en_base(&self) -> ConfigCouts {
+            self.base.lock().unwrap().tarifs(&couts_fictifs()).unwrap()
+        }
+    }
+
+    #[tokio::test]
+    async fn tarifs_saisis_appliques_gardes_et_journalises() {
+        let b = banc();
+        charger_jeu(&b);
+        let cookie = b.connecter().await;
+        let r = b.get("/tarifs", Some(&cookie)).await;
+        assert_eq!(r.code, StatusCode::OK);
+        assert!(r.texte.contains("name=\"noir\" value=\"0,01\""), "{}", r.texte);
+        assert!(r.texte.contains("name=\"couleur:COPIEUR-2\""), "{}", r.texte);
+
+        let r = b
+            .poster_tarifs(
+                "noir=0%2C02&couleur=&noir%3ACOPIEUR-1=&couleur%3ACOPIEUR-1=1.5",
+                &cookie,
+            )
+            .await;
+        assert_eq!(r.code, StatusCode::SEE_OTHER);
+        let r = b.get("/tarifs?enregistre=1", Some(&cookie)).await;
+        assert!(r.texte.contains("Tarifs enregistrés"), "{}", r.texte);
+        assert!(r.texte.contains("name=\"noir\" value=\"0,02\""), "{}", r.texte);
+        assert!(
+            r.texte.contains("name=\"couleur:COPIEUR-1\" value=\"1,5\""),
+            "{}",
+            r.texte
+        );
+
+        // Effet immédiat sur les rapports : 50 pages couleur à 1,5 € et 101 pages N&B à 0,02 € sur COPIEUR-1.
+        let r = b
+            .get(&format!("/rapports/copieur/csv?{NOVEMBRE}"), Some(&cookie))
+            .await;
+        assert!(r.texte.contains("77,02"), "{}", r.texte);
+
+        // Gardés en base, donc au redémarrage ; le changement est au journal, avec son auteur.
+        let t = b.tarifs_en_base();
+        assert_eq!((t.noir, t.couleur), (Some(0.02), None));
+        assert_eq!(t.prix("copieur-1", true), Some(150_000));
+        let ligne = b
+            .journal()
+            .into_iter()
+            .find(|l| l.1 == "tarifs_modifies")
+            .unwrap();
+        assert_eq!(ligne.0, "lecteur");
+        assert!(ligne.2.unwrap().contains("général N&B 0,02"));
+    }
+
+    #[tokio::test]
+    async fn tarif_faux_rien_n_est_enregistre_et_la_saisie_reste() {
+        let b = banc();
+        charger_jeu(&b);
+        let cookie = b.connecter().await;
+        for faux in ["abc", "-1", "1001", "inf", "NaN"] {
+            let r = b
+                .poster_tarifs(&format!("noir=0%2C5&couleur%3ACOPIEUR-1={faux}"), &cookie)
+                .await;
+            assert_eq!(r.code, StatusCode::BAD_REQUEST, "{faux}");
+            assert!(r.texte.contains("COPIEUR-1, couleur"), "{}", r.texte);
+            assert!(r.texte.contains(&format!("value=\"{faux}\"")), "{}", r.texte);
+            assert!(r.texte.contains("name=\"noir\" value=\"0,5\""), "{}", r.texte);
+        }
+        assert_eq!(b.tarifs_en_base(), couts_fictifs());
+        assert!(b.journal().iter().all(|l| l.1 != "tarifs_modifies"));
+    }
+
+    #[tokio::test]
+    async fn tarifs_champ_inconnu_refuse_et_nom_de_copieur_echappe() {
+        let b = banc();
+        let cookie = b.connecter().await;
+        for corps in ["noir%3AINVENTE=1", "autre=1", "rose%3ACOPIEUR-1=1"] {
+            let r = b.poster_tarifs(corps, &cookie).await;
+            assert_eq!(r.code, StatusCode::BAD_REQUEST, "{corps}");
+        }
+        assert_eq!(b.tarifs_en_base(), couts_fictifs());
+        {
+            let mut base = b.base.lock().unwrap();
+            let mut t = travail(1);
+            t.file = "F\"><script>".into();
+            base.enregistrer(&Evenement::Travail(t), 0).unwrap();
+        }
+        let r = b.get("/tarifs", Some(&cookie)).await;
+        assert!(!r.texte.contains("<script>"), "{}", r.texte);
+        assert!(
+            r.texte.contains("name=\"noir:F&quot;&gt;&lt;script&gt;\""),
+            "{}",
+            r.texte
+        );
+    }
+
+    #[tokio::test]
+    async fn tarifs_sans_session_refuses() {
+        let b = banc();
+        let r = b
+            .req(
+                axum::http::Request::post("/tarifs")
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from("noir=1"))
+                    .unwrap(),
+            )
+            .await;
+        assert_eq!(r.entetes.get(header::LOCATION).unwrap(), "/connexion");
+        assert_eq!(b.tarifs_en_base(), couts_fictifs());
     }
 
     #[tokio::test]

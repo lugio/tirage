@@ -103,6 +103,9 @@ input {
   border: 1px solid var(--bord-champ);
   border-radius: 4px;
 }
+form.tarifs input { width: 6rem; box-sizing: border-box; text-align: right; }
+form.tarifs .prix-general { display: flex; flex-wrap: wrap; gap: 0 1.5rem; }
+form.tarifs button { margin-top: 1rem; }
 button, .bouton {
   display: inline-block;
   padding: .35rem .8rem;

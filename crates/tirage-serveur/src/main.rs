@@ -88,6 +88,7 @@ fn servir(chemin: PathBuf) -> Result<(), String> {
         eprintln!("attention : aucun collecteur déclaré, tout envoi sera refusé");
     }
     let base = Base::ouvrir(&cfg.base).map_err(|e| format!("base {} : {e}", cfg.base.display()))?;
+    let tarifs = base.tarifs(&cfg.couts).map_err(|e| format!("tarifs : {e}"))?;
     let ecoute = cfg.ecoute.clone();
     let base = Arc::new(Mutex::new(base));
     let annuaire: Option<(Arc<dyn Annuaire>, u32)> = match &cfg.annuaire {
@@ -104,7 +105,7 @@ fn servir(chemin: PathBuf) -> Result<(), String> {
             Arc::new(Interface::nouvelle(
                 Arc::clone(a),
                 &cfg.interface,
-                cfg.couts.clone(),
+                tarifs.clone(),
                 cfg.conservation.detail_mois,
             ))
         }),
