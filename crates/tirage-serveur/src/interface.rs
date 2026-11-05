@@ -37,7 +37,7 @@ use gabarit::{
     Cellule, Colonne, FEUILLE_DE_STYLE, Rubrique, Tableau, bouton_lien, carte, duree, encoder_chemin, entier,
     erreur, note, onglets, page, taille, tuiles,
 };
-use graphique::{Point, Serie, barre, barre_basse, chaleur, colonnes_empilees, legende, segments};
+use graphique::{Point, Serie, barre, barre_teintee, chaleur, colonnes_empilees, legende, segments};
 
 const COOKIE: &str = "tirage_session";
 /// Minutes ouvrées sans relevé au-delà desquelles un copieur déjà relevé est dit muet.
@@ -1652,14 +1652,14 @@ async fn copieurs(
     Html(page(Rubrique::Copieurs, "Copieurs", &h, Some(&s))).into_response()
 }
 
-/// À ce niveau et en dessous, la jauge d'un toner change de teinte. L'alerte reste celle que donne l'appareil.
+/// À ce niveau et en dessous, le pourcentage d'un toner ressort. L'alerte reste celle que donne l'appareil.
 const TONER_BAS_POURCENT: u8 = 10;
-/// Colonnes de toner, et comment les reconnaître dans la description donnée par l'appareil.
-const TONERS: [(&str, [&str; 2]); 4] = [
-    ("Noir", ["black", "noir"]),
-    ("Cyan", ["cyan", "cyan"]),
-    ("Magenta", ["magenta", "magenta"]),
-    ("Jaune", ["yellow", "jaune"]),
+/// Colonnes de toner : nom, mots qui le reconnaissent dans la description donnée par l'appareil, teinte de sa jauge.
+const TONERS: [(&str, [&str; 2], &str); 4] = [
+    ("Noir", ["black", "noir"], "toner-noir"),
+    ("Cyan", ["cyan", "cyan"], "toner-cyan"),
+    ("Magenta", ["magenta", "magenta"], "toner-magenta"),
+    ("Jaune", ["yellow", "jaune"], "toner-jaune"),
 ];
 
 fn cellule_niveau(niveau: alertes::Niveau) -> Cellule {
@@ -1681,7 +1681,7 @@ fn rang_toner(description: &str) -> Option<usize> {
     }
     TONERS
         .iter()
-        .position(|(_, mots)| mots.iter().any(|m| d.contains(m)))
+        .position(|(_, mots, _)| mots.iter().any(|m| d.contains(m)))
 }
 
 /// Niveaux connus de chaque toner d'un relevé.
@@ -1716,7 +1716,8 @@ fn tableau_consommables(releves: &[ReleveCopieur], periode: &Periode) -> String 
         )
     });
     let mut colonnes = vec![Colonne::texte("Copieur")];
-    colonnes.extend(TONERS.iter().map(|(nom, _)| Colonne::nombre(nom)));
+    // Colonnes alignées à gauche, comme le pourcentage et la jauge qu'elles titrent.
+    colonnes.extend(TONERS.iter().map(|(nom, _, _)| Colonne::texte(nom)));
     let avec_autres = lignes.iter().any(|(r, _)| !autres_consommables(r).is_empty());
     if avec_autres {
         colonnes.push(Colonne::texte("Autres"));
@@ -1724,19 +1725,17 @@ fn tableau_consommables(releves: &[ReleveCopieur], periode: &Periode) -> String 
     let mut tableau = Tableau::nouveau(&colonnes);
     for (r, niveaux) in lignes {
         let mut cellules = vec![cellule_cle(Axe::Copieur, &r.copieur, periode)];
-        cellules.extend(TONERS.iter().zip(niveaux).map(|((nom, _), n)| match n {
+        cellules.extend(TONERS.iter().zip(niveaux).map(|((nom, _, teinte), n)| match n {
             Some(p) => {
-                let trace = if p <= TONER_BAS_POURCENT {
-                    barre_basse
+                let chiffre = if p <= TONER_BAS_POURCENT {
+                    format!("<b class=\"toner-bas\">{p} %</b>")
                 } else {
-                    barre
+                    format!("{p} %")
                 };
-                Cellule::Html(format!(
-                    "{p} %{}",
-                    trace(i64::from(p), 100, &format!("Toner {nom} : {p} %"))
-                ))
+                let jauge = barre_teintee(i64::from(p), 100, &format!("Toner {nom} : {p} %"), teinte);
+                Cellule::Html(format!("{chiffre}{jauge}"))
             }
-            None => Cellule::Nombre("—".to_owned()),
+            None => Cellule::texte("—"),
         }));
         if avec_autres {
             cellules.push(Cellule::Texte(autres_consommables(r)));
@@ -2920,6 +2919,10 @@ mod tests {
         assert_eq!(niveaux_toner(&tambour), [None; 4]);
         assert_eq!(autres_consommables(&tambour), "Drum Unit (Black) : 55 %");
         assert!(h.contains("Toner Cyan : 3 %"), "{h}");
+        assert!(h.contains("class=\"jauge toner-cyan\""), "{h}");
+        assert!(h.contains("class=\"jauge toner-noir\""), "{h}");
+        assert!(h.contains("<b class=\"toner-bas\">3 %</b>"), "{h}");
+        assert!(!h.contains("<b class=\"toner-bas\">90"), "{h}");
     }
 
     #[tokio::test]
