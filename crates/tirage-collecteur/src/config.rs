@@ -28,6 +28,8 @@ pub struct Snmp {
     pub delai_ms: u64,
     pub essais: u32,
     pub dossier_profils: Option<PathBuf>,
+    /// Temps entre deux relevés des copieurs déclarés, par le service ou la console.
+    pub intervalle_minutes: u64,
 }
 
 impl Default for Snmp {
@@ -36,6 +38,7 @@ impl Default for Snmp {
             delai_ms: 2000,
             essais: 2,
             dossier_profils: None,
+            intervalle_minutes: 60,
         }
     }
 }
@@ -43,6 +46,10 @@ impl Default for Snmp {
 impl Snmp {
     pub fn delai(&self) -> Duration {
         Duration::from_millis(self.delai_ms.clamp(100, 30_000))
+    }
+
+    pub fn intervalle(&self) -> Duration {
+        Duration::from_secs(self.intervalle_minutes.clamp(5, 1440) * 60)
     }
 }
 

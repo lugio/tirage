@@ -2,6 +2,7 @@
 
 ## [Non publié]
 ### Ajouté
+- Collecteur : relevé automatique des copieurs déclarés (`[snmp] intervalle_minutes`, 60 par défaut), envoyé par la file ; profil Konica Minolta avec compteurs noir et couleur, copie et impression, y compris sur un appareil sans fonction copie.
 - Interface : page Tarifs, prix par page N&B et couleur, général ou par copieur, gardés en base, inscrits au journal ; ils priment sur `[couts]`.
 - Interface : état de la collecte (dernier travail reçu par collecteur, avertissement s'il est muet en heures ouvrées) ; activité par jour et par heure, globale ou par copieur, jamais par personne ; rapport par application ; gros travaux par copieur. Seuls les travaux en couleur sont signalés comme gros. Réglages `gros_travail_couleur_pages`, `collecte_silence_minutes`, `heure_ouverture`, `heure_fermeture`.
 - Interface : page Copieurs alimentée par les travaux (activité, personnes, non imprimés, dernier travail), sans attendre le relevé SNMP ; raccourcis de période ; comparaison à la période précédente et feuilles évitées par le recto-verso ; vue d'un service, d'un cabinet ou d'un copieur, journalisée ; fiche d'une personne avec ses totaux, son évolution, ses copieurs, et durée, taille, résolution et orientation de chaque travail.

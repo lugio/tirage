@@ -77,9 +77,16 @@ fn lire_options(args: &[String]) -> Result<OptionsConsole, String> {
 fn resoudre(o: OptionsConsole) -> Result<Reglages, String> {
     // Ligne de commande, puis configuration, puis valeurs par défaut.
     let cfg = o.config.as_deref().map(Config::charger).transpose()?;
-    let (c_donnees, c_collecteur, c_politique, serveur) = match cfg {
-        Some(c) => (c.donnees, Some(c.collecteur), Some(c.nom_document), c.serveur),
-        None => (None, None, None, None),
+    let (c_donnees, c_collecteur, c_politique, serveur, snmp, copieurs) = match cfg {
+        Some(c) => (
+            c.donnees,
+            Some(c.collecteur),
+            Some(c.nom_document),
+            c.serveur,
+            c.snmp,
+            c.copieurs,
+        ),
+        None => (None, None, None, None, Default::default(), Vec::new()),
     };
     let collecteur = o
         .collecteur
@@ -93,6 +100,8 @@ fn resoudre(o: OptionsConsole) -> Result<Reglages, String> {
         collecteur,
         politique: o.politique.or(c_politique).unwrap_or_default(),
         serveur,
+        snmp,
+        copieurs,
     })
 }
 

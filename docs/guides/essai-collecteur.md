@@ -86,6 +86,13 @@ dans un dépôt. La communauté n'est jamais passée en ligne de commande ni aff
 Le client SNMP ne sait que lire (GET, GETNEXT) : aucune requête d'écriture n'existe dans le code. La sortie d'un
 parcours contient l'identité de l'appareil (numéro de série…) : la traiter comme une donnée interne.
 
+### Relevés automatiques
+
+Le service et le mode console relèvent chaque copieur déclaré dès le démarrage, puis toutes les
+`[snmp] intervalle_minutes` (60 par défaut). Les relevés passent par la même file que les travaux et arrivent sur la
+page Copieurs. Un copieur éteint est signalé une fois au journal, puis une fois à son retour. Sans copieur déclaré,
+aucun relevé n'a lieu.
+
 ### Profils de marque
 
 `crates/tirage-collecteur/profils/*.toml` (intégrés à l'exécutable) ; d'autres profils peuvent être déposés dans
