@@ -231,3 +231,7 @@ rect.chaleur.n1 { fill-opacity: .2; }
 rect.chaleur.n2 { fill-opacity: .38; }
 rect.chaleur.n3 { fill-opacity: .56; }
 rect.chaleur.n4 { fill-opacity: .78; }
+
+/* Deux cartes qui se suivent hors d'une grille ne se touchent pas. */
+.carte + .carte { margin-top: 1rem; }
+.grille > .carte + .carte { margin-top: 0; }

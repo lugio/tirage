@@ -2329,6 +2329,7 @@ mod tests {
         assert_eq!(duree(2_400), "2 s");
         assert_eq!(duree(125_000), "2 min 5 s");
         assert_eq!(duree(3_660_000), "1 h 1 min");
+        assert_eq!(duree(7_200_000), "2 h");
         assert_eq!(taille(10), "10 o");
         assert_eq!(taille(2_048), "2 Ko");
         assert_eq!(taille(1_572_864), "1,5 Mo");

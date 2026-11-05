@@ -245,7 +245,8 @@ pub fn chaleur(
     const GOUTTIERE: f64 = 9.0;
     const TETE: usize = 18;
     const RANG: usize = 26;
-    let case = (100.0 - GOUTTIERE) / colonnes.len() as f64;
+    // Une marge à droite : la dernière étiquette, centrée sur sa case, déborderait sur mobile.
+    let case = (100.0 - GOUTTIERE - 3.0) / colonnes.len() as f64;
     let mut h = format!(
         "<svg class=\"graphique\" width=\"100%\" height=\"{}\" role=\"img\" aria-label=\"{}\">",
         TETE + RANG * lignes.len(),
