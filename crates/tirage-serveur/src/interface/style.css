@@ -223,3 +223,11 @@ details .defile { margin-top: .5rem; }
 /* Mesure seule : ni une série, ni un classement. */
 rect.jauge { fill: var(--chiffre); }
 .sous-mesure { margin: 1rem 0 .4rem; font-size: .9rem; }
+
+/* Carte de chaleur : une seule teinte, cinq niveaux ; le bord couleur de surface sépare les cases. */
+rect.chaleur { fill: var(--chiffre); stroke: var(--surface); stroke-width: 2; }
+rect.chaleur.n0 { fill: var(--entete-tableau); }
+rect.chaleur.n1 { fill-opacity: .2; }
+rect.chaleur.n2 { fill-opacity: .38; }
+rect.chaleur.n3 { fill-opacity: .56; }
+rect.chaleur.n4 { fill-opacity: .78; }

@@ -35,7 +35,7 @@ use gabarit::{
     Cellule, Colonne, FEUILLE_DE_STYLE, Rubrique, Tableau, bouton_lien, carte, duree, encoder_chemin, entier,
     erreur, note, onglets, page, taille, tuiles,
 };
-use graphique::{Point, Serie, barre, colonnes_empilees, jauge, legende, segments};
+use graphique::{Point, Serie, barre, chaleur, colonnes_empilees, jauge, legende, segments};
 
 const COOKIE: &str = "tirage_session";
 const CORPS_MAX: usize = 16 * 1024;
@@ -63,6 +63,11 @@ const SERIES: [Serie; 3] = [SERIE_NOIR, SERIE_COULEUR, SERIE_INCONNU];
 const APERCU_TAILLE: usize = 5;
 
 const PALMARES_TAILLE: usize = 10;
+/// En dessous, l'activité horaire et les gros travaux d'un copieur décriraient une personne : ils ne s'affichent pas.
+const PERSONNES_MIN_COPIEUR: i64 = 3;
+/// Une réception plus ancienne ne compte plus : un collecteur retiré finit par sortir de l'état de la collecte.
+const COLLECTE_JOURS: i64 = 30;
+const JOURS_SEMAINE: [&str; 7] = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 
 pub struct Interface {
     annuaire: Arc<dyn Annuaire>,
@@ -72,6 +77,9 @@ pub struct Interface {
     fuseau: TimeZone,
     couts: ConfigCouts,
     detail_mois: u32,
+    gros_travail_pages: u32,
+    collecte_silence_minutes: u32,
+    heures_ouvrees: (u8, u8),
 }
 
 impl Interface {
@@ -90,7 +98,36 @@ impl Interface {
             fuseau: TimeZone::get(&c.fuseau).unwrap_or(TimeZone::UTC),
             couts,
             detail_mois,
+            gros_travail_pages: c.gros_travail_pages,
+            collecte_silence_minutes: c.collecte_silence_minutes,
+            heures_ouvrees: (c.heure_ouverture, c.heure_fermeture),
         }
+    }
+
+    /// État de la collecte : ne contient aucune donnée personnelle.
+    fn etat_collecte(&self, receptions: &[(String, i64)], maintenant_ms: i64) -> String {
+        if receptions.is_empty() {
+            return erreur(&format!(
+                "Collecte : aucun travail reçu depuis {COLLECTE_JOURS} jours. Vérifier le collecteur sur le serveur d'impression."
+            ));
+        }
+        let seuil = i64::from(self.collecte_silence_minutes);
+        let mut h = String::new();
+        for (collecteur, recu_ms) in receptions {
+            let silence =
+                rapports::minutes_ouvrees(*recu_ms, maintenant_ms, &self.fuseau, self.heures_ouvrees, seuil);
+            let quand = self.heure(*recu_ms);
+            h.push_str(&if silence >= seuil {
+                erreur(&format!(
+                    "Collecte muette : {collecteur} n'a envoyé aucun travail depuis le {quand}, soit au moins {} ouvrées. \
+                     Vérifier le collecteur ; un jour férié ou une période sans impression donne le même signe.",
+                    duree(seuil * 60_000)
+                ))
+            } else {
+                note(&format!("Collecte : {collecteur}, dernier travail reçu le {quand}."))
+            });
+        }
+        h
     }
 
     /// Avis si la période remonte avant la limite de conservation du détail.
@@ -598,7 +635,11 @@ async fn accueil(
         Ok(v) => v,
         Err(rep) => return *rep,
     };
-    let tranches = match lire_evolution(&c, &periode).await {
+    let (tranches, temps) = match lire_evolution(&c, &periode).await {
+        Ok(v) => v,
+        Err(rep) => return *rep,
+    };
+    let receptions = match lire_receptions(&c).await {
         Ok(v) => v,
         Err(rep) => return *rep,
     };
@@ -606,7 +647,8 @@ async fn accueil(
     let (services, copieurs) = (lignes.first().unwrap_or(&vide), lignes.get(1).unwrap_or(&vide));
     let t = rapports::total(services);
     let maintenant = (c.horloge)();
-    let mut h = i.selecteur(&periode, "/", maintenant);
+    let mut h = i.etat_collecte(&receptions, maintenant);
+    h.push_str(&i.selecteur(&periode, "/", maintenant));
     h.push_str(&tuiles_de(&t, &i.couts.devise));
     if let Some(precedente) = i.periode_precedente(&periode, maintenant) {
         match lire_total(&c, &precedente).await {
@@ -619,6 +661,10 @@ async fn accueil(
     h.push_str(&carte(
         "Pages imprimées dans le temps",
         &bloc_evolution(&tranches),
+    ));
+    h.push_str(&carte(
+        "Activité par jour et par heure",
+        &bloc_activite(&temps, &i.fuseau),
     ));
     h.push_str("<div class=\"grille\">");
     h.push_str(&carte("Couleur et recto-verso", &bloc_modes(&t)));
@@ -717,8 +763,56 @@ fn bloc_modes(t: &Ligne) -> String {
     )
 }
 
-/// Pages dans le temps. Lu après `lire_rapports`, qui a déjà inscrit la consultation au journal.
-async fn lire_evolution(c: &Contexte, p: &Periode) -> Result<Vec<Tranche>, Box<Response>> {
+/// Carte de chaleur sur le détail encore conservé. Jamais pour une personne : seuls le tableau de bord et la vue d'un
+/// copieur, à partir de quelques personnes, l'appellent.
+fn bloc_activite(temps: &[(i64, String, i64)], fuseau: &TimeZone) -> String {
+    let grille = rapports::activite_horaire(temps, fuseau);
+    // Les heures utiles, journée de bureau au moins ; le week-end seulement s'il y a eu quelque chose.
+    let utile = |h: usize| grille.iter().any(|j| j[h] > 0);
+    let debut = (0..24).find(|h| utile(*h)).unwrap_or(8).min(8);
+    let fin = (0..24).rfind(|h| utile(*h)).unwrap_or(18).max(18);
+    let colonnes: Vec<String> = (debut..=fin).map(|h| format!("{h} h")).collect();
+    let lignes: Vec<(&str, Vec<i64>)> = JOURS_SEMAINE
+        .iter()
+        .zip(&grille)
+        .enumerate()
+        .filter(|(n, (_, j))| *n < 5 || j.iter().any(|v| *v > 0))
+        .map(|(_, (nom, j))| (*nom, j[debut..=fin].to_vec()))
+        .collect();
+    let Some(svg) = chaleur(
+        "Pages imprimées par jour de la semaine et par heure",
+        "pages",
+        &colonnes,
+        &lignes,
+    ) else {
+        return note("Aucune page sur cette période.");
+    };
+    let mut entete = vec![Colonne::texte("Jour")];
+    entete.extend(colonnes.iter().map(|c| Colonne::nombre(c)));
+    let mut tableau = Tableau::nouveau(&entete);
+    for (nom, valeurs) in &lignes {
+        tableau.ligne(
+            std::iter::once(Cellule::texte(nom)).chain(valeurs.iter().map(|v| Cellule::Nombre(entier(*v)))),
+        );
+    }
+    format!(
+        "{svg}{}<details><summary>Voir les chiffres</summary>{}</details>",
+        note("Pages cumulées sur la période : plus la case est foncée, plus il y en a."),
+        tableau.fin()
+    )
+}
+
+/// Dernières réceptions, sans donnée personnelle : rien à inscrire au journal.
+async fn lire_receptions(c: &Contexte) -> Result<Vec<(String, i64)>, Box<Response>> {
+    let depuis = (c.horloge)() - COLLECTE_JOURS * 86_400_000;
+    avec_base(&c.base, move |b| b.dernieres_receptions(depuis)).await
+}
+
+/// Pages dans le temps, en tranches et brutes. Lu après `lire_rapports`, qui a déjà inscrit la consultation au journal.
+async fn lire_evolution(
+    c: &Contexte,
+    p: &Periode,
+) -> Result<(Vec<Tranche>, Vec<(i64, String, i64)>), Box<Response>> {
     let (du, au, du_ms, au_ms, mois) = (p.du, p.au, p.du_ms, p.au_ms, p.mois_entiers());
     let interface = Arc::clone(&c.interface);
     avec_base(&c.base, move |b| {
@@ -727,7 +821,8 @@ async fn lire_evolution(c: &Contexte, p: &Periode) -> Result<Vec<Tranche>, Box<R
             Some((premier, dernier)) => b.pages_archivees(premier, dernier)?,
             None => Vec::new(),
         };
-        Ok(rapports::evolution(du, au, &interface.fuseau, &detail, &archives))
+        let tranches = rapports::evolution(du, au, &interface.fuseau, &detail, &archives);
+        Ok((tranches, detail))
     })
     .await
 }
@@ -808,6 +903,12 @@ async fn rapport(
     let mut h = i.selecteur(&periode, &format!("/rapports/{}", axe.chemin()), (c.horloge)());
     h.push_str(&onglets_rapports(&periode, Some(axe)));
     h.push_str(&note_sur_le_calcul(&t, non_imprimes, &i.couts.devise));
+    if axe == Axe::Application {
+        h.push_str(&note(
+            "L'application est déduite du titre du document : elle reste inconnue quand le titre ne la dit pas. \
+             Les totaux archivés ne la gardent pas.",
+        ));
+    }
     h.push_str(&i.avis_conservation(&periode, (c.horloge)()));
     h.push_str(&liste_palmares(
         "Les plus gros volumes",
@@ -834,7 +935,7 @@ async fn rapport(
 fn cellule_cle(axe: Axe, cle: &str, periode: &Periode) -> Cellule {
     let racine = match axe {
         Axe::Utilisateur => return Cellule::utilisateur(cle),
-        Axe::Format => return Cellule::texte(cle),
+        Axe::Format | Axe::Application => return Cellule::texte(cle),
         Axe::Service => Vue::Service.chemin(),
         Axe::Cabinet => Vue::Cabinet.chemin(),
         Axe::Copieur => Vue::Copieur.chemin(),
@@ -960,6 +1061,38 @@ async fn vue_copieur(
     vue(c, s, Vue::Copieur, valeur, d).await
 }
 
+/// Vrai si le copieur est assez partagé pour que son activité ne décrive pas une personne.
+fn assez_de_personnes(a: &ActiviteCopieur) -> bool {
+    a.personnes >= PERSONNES_MIN_COPIEUR
+}
+
+/// Activité horaire et gros travaux d'un copieur, sans nom, à partir de quelques personnes sur la période.
+fn bloc_copieur_anonyme(
+    i: &Interface,
+    activite: Option<&ActiviteCopieur>,
+    t: &Ligne,
+    temps: &[(i64, String, i64)],
+) -> String {
+    let Some(a) = activite.filter(|a| assez_de_personnes(a)) else {
+        return note(&format!(
+            "Activité par heure et gros travaux : affichés à partir de {PERSONNES_MIN_COPIEUR} personnes sur la période, \
+             pour ne décrire personne en particulier."
+        ));
+    };
+    let gros = format!(
+        "Travaux d'au moins {} pages : {}, soit {} pages et {} des pages du copieur.",
+        entier(i64::from(i.gros_travail_pages)),
+        entier(a.gros_travaux),
+        entier(a.gros_pages),
+        pourcentage(a.gros_pages, t.pages)
+    );
+    format!(
+        "{}{}",
+        carte("Activité par jour et par heure", &bloc_activite(temps, &i.fuseau)),
+        carte("Gros travaux", &format!("<p>{}</p>", echapper(&gros)))
+    )
+}
+
 /// Détail seul : les totaux archivés, sans nom, ne se découpent pas par personne.
 async fn vue(c: Contexte, s: Session, vue: Vue, valeur: String, d: Demande) -> Response {
     let i = Arc::clone(&c.interface);
@@ -984,14 +1117,22 @@ async fn vue(c: Contexte, s: Session, vue: Vue, valeur: String, d: Demande) -> R
         let lignes1 = b.agreger_filtre(axe1, du, au, filtre)?;
         let lignes2 = b.agreger_filtre(axe2, du, au, filtre)?;
         let temps = b.pages_dans_le_temps_filtre(du, au, filtre)?;
+        let activite = if vue == Vue::Copieur {
+            b.activite_copieurs(du, au, i64::from(interface.gros_travail_pages))?
+                .into_iter()
+                .find(|a| a.file.eq_ignore_ascii_case(&valeur_lue))
+        } else {
+            None
+        };
         Ok((
             rapports::construire(&lignes1, &interface.couts),
             rapports::construire(&lignes2, &interface.couts),
             temps,
+            activite,
         ))
     })
     .await;
-    let (lignes1, lignes2, temps) = match lu {
+    let (lignes1, lignes2, temps, activite) = match lu {
         Ok(v) => v,
         Err(rep) => return *rep,
     };
@@ -1008,6 +1149,9 @@ async fn vue(c: Contexte, s: Session, vue: Vue, valeur: String, d: Demande) -> R
         "Pages imprimées dans le temps",
         &bloc_evolution(&tranches),
     ));
+    if vue == Vue::Copieur {
+        h.push_str(&bloc_copieur_anonyme(&i, activite.as_ref(), &t, &temps));
+    }
     h.push_str("<div class=\"grille\">");
     h.push_str(&carte("Couleur et recto-verso", &bloc_modes(&t)));
     h.push_str(&liste_palmares(
@@ -1148,6 +1292,7 @@ fn tableau_activite(
         Colonne::nombre("Feuilles"),
         Colonne::nombre("Personnes"),
         Colonne::nombre("Non imprimés"),
+        Colonne::nombre("Gros travaux"),
         Colonne::texte("Dernier travail"),
     ]);
     let cherche = |file: &str| activite.iter().find(|a| a.file.eq_ignore_ascii_case(file));
@@ -1169,6 +1314,10 @@ fn tableau_activite(
             Cellule::Nombre(entier(l.feuilles)),
             Cellule::Nombre(a.map_or("—".to_owned(), |a| entier(a.personnes))),
             Cellule::Nombre(a.map_or("—".to_owned(), |a| entier(a.non_imprimes))),
+            Cellule::Nombre(
+                a.filter(|a| assez_de_personnes(a))
+                    .map_or("—".to_owned(), |a| entier(a.gros_travaux)),
+            ),
             Cellule::Texte(a.map_or(String::new(), |a| i.heure(a.dernier_ms))),
         ]);
     }
@@ -1192,17 +1341,22 @@ async fn copieurs(
         Err(rep) => return *rep,
     };
     let lignes = lignes.first().map_or(&[][..], Vec::as_slice);
-    let (du, au) = (periode.du_ms, periode.au_ms);
+    let (du, au, seuil) = (periode.du_ms, periode.au_ms, i64::from(i.gros_travail_pages));
     let lu = avec_base(&c.base, move |b| {
-        Ok((b.activite_copieurs(du, au)?, b.derniers_releves()?))
+        Ok((b.activite_copieurs(du, au, seuil)?, b.derniers_releves()?))
     })
     .await;
     let (activite, releves) = match lu {
         Ok(r) => r,
         Err(rep) => return *rep,
     };
+    let receptions = match lire_receptions(&c).await {
+        Ok(v) => v,
+        Err(rep) => return *rep,
+    };
     let t = rapports::total(lignes);
-    let mut h = i.selecteur(&periode, "/copieurs", maintenant);
+    let mut h = i.etat_collecte(&receptions, maintenant);
+    h.push_str(&i.selecteur(&periode, "/copieurs", maintenant));
     h.push_str(&note_sur_le_calcul(&t, non_imprimes, &i.couts.devise));
     h.push_str(&i.avis_conservation(&periode, maintenant));
     h.push_str("<h2>Activité</h2>");
@@ -1214,6 +1368,11 @@ async fn copieurs(
         PALMARES_TAILLE,
     ));
     h.push_str(&tableau_activite(&i, lignes, &activite, &periode));
+    h.push_str(&note(&format!(
+        "Gros travaux : au moins {} pages, copies comprises. Affichés à partir de {PERSONNES_MIN_COPIEUR} personnes \
+         sur la période, pour ne décrire personne en particulier.",
+        entier(seuil)
+    )));
     h.push_str("<h2>État relevé</h2>");
     let compteur = |v: Option<u64>| {
         Cellule::Nombre(v.map_or("—".to_owned(), |n| entier(i64::try_from(n).unwrap_or(i64::MAX))))
@@ -2173,6 +2332,152 @@ mod tests {
         assert_eq!(taille(10), "10 o");
         assert_eq!(taille(2_048), "2 Ko");
         assert_eq!(taille(1_572_864), "1,5 Mo");
+    }
+
+    /// Jeu pour B1-B4 : COPIEUR-1 partagé par trois personnes, COPIEUR-2 par une seule.
+    fn charger_partage(b: &Banc, recu_ms: i64) {
+        let mut base = b.base.lock().unwrap();
+        let mut ajouter = |n: u32, u: &str, f: &str, pages: u32, app: Option<&str>| {
+            let mut t = travail(n);
+            t.utilisateur = u.into();
+            t.file = f.into();
+            t.pages = pages;
+            t.copies = 1;
+            t.application = app.map(str::to_owned);
+            t.envoye_ms = DEBUT_NOVEMBRE + i64::from(n);
+            base.enregistrer(&Evenement::Travail(t), recu_ms).unwrap();
+        };
+        ajouter(1, "a.exemple", "COPIEUR-1", 250, Some("Tableur"));
+        ajouter(2, "b.exemple", "COPIEUR-1", 10, Some("Tableur"));
+        ajouter(3, "c.exemple", "COPIEUR-1", 10, None);
+        ajouter(4, "a.exemple", "COPIEUR-2", 300, Some("Texte"));
+    }
+
+    #[tokio::test]
+    async fn etat_de_la_collecte() {
+        let b = banc();
+        let cookie = b.connecter().await;
+        let r = b.get("/", Some(&cookie)).await;
+        assert!(
+            r.texte.contains("aucun travail reçu depuis 30 jours"),
+            "{}",
+            r.texte
+        );
+        // MAINTENANT = dimanche 15/11 12:00 UTC ; reçu le vendredi 13/11 à 16:30 UTC, 17:30 à Paris : 30 min ouvrées.
+        charger_partage(&b, MAINTENANT - 156_600_000);
+        for chemin in ["/", "/copieurs"] {
+            let r = b.get(chemin, Some(&cookie)).await;
+            assert!(
+                r.texte.contains("dernier travail reçu le 13/11/2026 17:30"),
+                "{}",
+                r.texte
+            );
+            assert!(!r.texte.contains("Collecte muette"));
+        }
+    }
+
+    #[tokio::test]
+    async fn collecte_muette_signalee() {
+        let b = banc();
+        // Mercredi 11/11 à 09:00 UTC : plus de 2 h ouvrées depuis.
+        charger_partage(&b, MAINTENANT - 356_400_000);
+        let cookie = b.connecter().await;
+        let r = b.get("/", Some(&cookie)).await;
+        assert!(r.texte.contains("Collecte muette"), "{}", r.texte);
+        assert!(r.texte.contains("class=\"erreur\""));
+    }
+
+    #[tokio::test]
+    async fn activite_horaire_seulement_global_et_copieur_partage() {
+        let b = banc();
+        charger_partage(&b, MAINTENANT);
+        let cookie = b.connecter().await;
+        let titre = "Activité par jour et par heure";
+        let r = b.get(&format!("/?{NOVEMBRE}"), Some(&cookie)).await;
+        assert!(
+            r.texte.contains(titre) && r.texte.contains("chaleur n5"),
+            "{}",
+            r.texte
+        );
+        // Copieur partagé : affichée.
+        let r = b
+            .get(&format!("/copieurs/COPIEUR-1?{NOVEMBRE}"), Some(&cookie))
+            .await;
+        assert!(r.texte.contains(titre), "{}", r.texte);
+        // Copieur d'une seule personne : masquée, comme tout ce qui la décrirait.
+        let r = b
+            .get(&format!("/copieurs/COPIEUR-2?{NOVEMBRE}"), Some(&cookie))
+            .await;
+        assert!(
+            !r.texte.contains(titre) && !r.texte.contains("chaleur"),
+            "{}",
+            r.texte
+        );
+        // Jamais pour une personne ni pour un service.
+        for chemin in ["/utilisateurs/a.exemple", "/services/Non%20rattach%C3%A9"] {
+            let r = b.get(&format!("{chemin}?{NOVEMBRE}"), Some(&cookie)).await;
+            assert_eq!(r.code, StatusCode::OK);
+            assert!(
+                !r.texte.contains(titre) && !r.texte.contains("chaleur"),
+                "{chemin}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn gros_travaux_par_copieur_seulement() {
+        let b = banc();
+        charger_partage(&b, MAINTENANT);
+        let cookie = b.connecter().await;
+        let r = b
+            .get(&format!("/copieurs/COPIEUR-1?{NOVEMBRE}"), Some(&cookie))
+            .await;
+        assert!(
+            r.texte
+                .contains("Travaux d&#39;au moins 100 pages : 1, soit 250 pages et 93 % des pages"),
+            "{}",
+            r.texte
+        );
+        // 300 pages, mais une seule personne : aucun chiffre.
+        let r = b
+            .get(&format!("/copieurs/COPIEUR-2?{NOVEMBRE}"), Some(&cookie))
+            .await;
+        assert!(!r.texte.contains("Travaux d&#39;au moins"), "{}", r.texte);
+        let r = b.get(&format!("/copieurs?{NOVEMBRE}"), Some(&cookie)).await;
+        assert!(
+            r.texte.contains("Gros travaux") && r.texte.contains(">—<"),
+            "{}",
+            r.texte
+        );
+        for chemin in ["/utilisateurs/a.exemple", "/palmares", "/rapports/utilisateur"] {
+            let r = b.get(&format!("{chemin}?{NOVEMBRE}"), Some(&cookie)).await;
+            assert!(!r.texte.contains("Gros travaux"), "{chemin}");
+        }
+    }
+
+    #[tokio::test]
+    async fn rapport_par_application_sans_poste() {
+        let b = banc();
+        charger_partage(&b, MAINTENANT);
+        let cookie = b.connecter().await;
+        let r = b
+            .get(&format!("/rapports/application?{NOVEMBRE}"), Some(&cookie))
+            .await;
+        assert_eq!(r.code, StatusCode::OK);
+        assert!(
+            r.texte.contains("Tableur") && r.texte.contains("Inconnue"),
+            "{}",
+            r.texte
+        );
+        assert!(!r.texte.contains("a.exemple"), "pas de personne dans ce rapport");
+        let r = b
+            .get(&format!("/rapports/application/csv?{NOVEMBRE}"), Some(&cookie))
+            .await;
+        assert!(r.texte.contains("Tableur"));
+        assert_eq!(
+            b.get("/rapports/poste", Some(&cookie)).await.code,
+            StatusCode::NOT_FOUND
+        );
     }
 
     #[tokio::test]

@@ -186,6 +186,9 @@ pub struct ActiviteCopieur {
     pub dernier_ms: i64,
     pub non_imprimes: i64,
     pub personnes: i64,
+    /// Travaux imprimés d'au moins le seuil demandé, et leurs pages.
+    pub gros_travaux: i64,
+    pub gros_pages: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -330,6 +333,7 @@ impl Base {
             Axe::Cabinet => "COALESCE(NULLIF(p.cabinet, ''), 'Non rattaché')",
             Axe::Copieur => "t.file",
             Axe::Format => "COALESCE(NULLIF(t.format, ''), 'Inconnu')",
+            Axe::Application => "COALESCE(NULLIF(t.application, ''), 'Inconnue')",
         };
         let sql = format!(
             "SELECT {cle}, max(p.nom), t.file, t.couleur, t.recto_verso, count(*), sum(t.pages_totales), sum(t.feuilles)
@@ -379,19 +383,38 @@ impl Base {
         .collect()
     }
 
-    /// Dernier travail, travaux non imprimés et nombre de personnes de chaque copieur, sur `[du_ms, au_ms[`.
-    pub fn activite_copieurs(&self, du_ms: i64, au_ms: i64) -> rusqlite::Result<Vec<ActiviteCopieur>> {
+    /// Dernière réception de chaque collecteur, parmi les travaux envoyés depuis `depuis_ms`. Un collecteur retiré
+    /// finit par sortir de la liste.
+    pub fn dernieres_receptions(&self, depuis_ms: i64) -> rusqlite::Result<Vec<(String, i64)>> {
         let mut s = self.conn.prepare(
-            "SELECT file, max(envoye_ms), sum(statut <> 'imprime'), count(DISTINCT utilisateur COLLATE NOCASE)
+            "SELECT collecteur, max(recu_ms) FROM travaux WHERE envoye_ms >= ?1 GROUP BY collecteur ORDER BY collecteur",
+        )?;
+        s.query_map([depuis_ms], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect()
+    }
+
+    /// Dernier travail, travaux non imprimés et nombre de personnes de chaque copieur, sur `[du_ms, au_ms[`.
+    pub fn activite_copieurs(
+        &self,
+        du_ms: i64,
+        au_ms: i64,
+        gros_pages: i64,
+    ) -> rusqlite::Result<Vec<ActiviteCopieur>> {
+        let mut s = self.conn.prepare(
+            "SELECT file, max(envoye_ms), sum(statut <> 'imprime'), count(DISTINCT utilisateur COLLATE NOCASE),
+                sum(statut = 'imprime' AND pages_totales >= ?3),
+                sum(CASE WHEN statut = 'imprime' AND pages_totales >= ?3 THEN pages_totales ELSE 0 END)
              FROM travaux WHERE envoye_ms >= ?1 AND envoye_ms < ?2
              GROUP BY file COLLATE NOCASE ORDER BY file",
         )?;
-        s.query_map([du_ms, au_ms], |r| {
+        s.query_map([du_ms, au_ms, gros_pages], |r| {
             Ok(ActiviteCopieur {
                 file: r.get(0)?,
                 dernier_ms: r.get(1)?,
                 non_imprimes: r.get(2)?,
                 personnes: r.get(3)?,
+                gros_travaux: r.get(4)?,
+                gros_pages: r.get(5)?,
             })
         })?
         .collect()
@@ -418,7 +441,8 @@ impl Base {
         dernier: &str,
     ) -> rusqlite::Result<Vec<LigneBrute>> {
         let cle = match axe {
-            Axe::Utilisateur => return Ok(Vec::new()),
+            // Ni personne ni application dans les totaux archivés.
+            Axe::Utilisateur | Axe::Application => return Ok(Vec::new()),
             Axe::Service => "service",
             Axe::Cabinet => "cabinet",
             Axe::Copieur => "file",
@@ -897,10 +921,57 @@ pub(crate) mod tests {
         ajouter(1, "a.exemple", Statut::Imprime, 10);
         ajouter(2, "A.EXEMPLE", Statut::Erreur, 30);
         ajouter(3, "b.exemple", Statut::Annule, 20);
-        let a = b.activite_copieurs(0, 100).unwrap();
+        let a = b.activite_copieurs(0, 100, 1).unwrap();
         assert_eq!(a.len(), 1);
         assert_eq!((a[0].dernier_ms, a[0].non_imprimes, a[0].personnes), (30, 2, 2));
-        assert!(b.activite_copieurs(0, 10).unwrap().is_empty());
+        // Seul le travail imprimé compte comme gros.
+        assert_eq!(a[0].gros_travaux, 1);
+        assert!(a[0].gros_pages > 0);
+        assert_eq!(b.activite_copieurs(0, 100, 1_000_000).unwrap()[0].gros_travaux, 0);
+        assert!(b.activite_copieurs(0, 10, 1).unwrap().is_empty());
+    }
+
+    #[test]
+    fn dernieres_receptions_par_collecteur() {
+        let mut b = Base::en_memoire().unwrap();
+        let mut ajouter = |n: u32, c: &str, envoye: i64, recu: i64| {
+            let mut t = travail(n);
+            t.collecteur = c.into();
+            t.envoye_ms = envoye;
+            b.enregistrer(&Evenement::Travail(t), recu).unwrap();
+        };
+        ajouter(1, "un", 100, 110);
+        ajouter(2, "un", 200, 250);
+        ajouter(3, "deux", 300, 300);
+        ajouter(4, "ancien", 10, 20);
+        assert_eq!(
+            b.dernieres_receptions(50).unwrap(),
+            [("deux".to_owned(), 300), ("un".to_owned(), 250)]
+        );
+    }
+
+    #[test]
+    fn agregat_par_application() {
+        let mut b = Base::en_memoire().unwrap();
+        let mut t = travail(1);
+        t.application = Some("Tableur".into());
+        b.enregistrer(&Evenement::Travail(t), 0).unwrap();
+        let mut t = travail(2);
+        t.application = None;
+        b.enregistrer(&Evenement::Travail(t), 0).unwrap();
+        let mut cles: Vec<String> = b
+            .agreger(Axe::Application, 0, i64::MAX)
+            .unwrap()
+            .into_iter()
+            .map(|l| l.cle)
+            .collect();
+        cles.sort();
+        assert_eq!(cles, ["Inconnue", "Tableur"]);
+        assert!(
+            b.totaux_archives(Axe::Application, "2026-01", "2026-12")
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

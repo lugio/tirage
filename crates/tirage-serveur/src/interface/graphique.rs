@@ -230,6 +230,63 @@ pub fn barre(valeur: i64, max: i64, libelle: &str) -> String {
     )
 }
 
+/// Carte de chaleur : une ligne par libellé, une case par colonne, plus foncée quand la valeur monte (cinq niveaux,
+/// une seule teinte). `None` si tout est à zéro.
+pub fn chaleur(
+    description: &str,
+    unite: &str,
+    colonnes: &[String],
+    lignes: &[(&str, Vec<i64>)],
+) -> Option<String> {
+    let max = lignes.iter().flat_map(|(_, v)| v).copied().max().unwrap_or(0);
+    if max <= 0 || colonnes.is_empty() {
+        return None;
+    }
+    const GOUTTIERE: f64 = 9.0;
+    const TETE: usize = 18;
+    const RANG: usize = 26;
+    let case = (100.0 - GOUTTIERE) / colonnes.len() as f64;
+    let mut h = format!(
+        "<svg class=\"graphique\" width=\"100%\" height=\"{}\" role=\"img\" aria-label=\"{}\">",
+        TETE + RANG * lignes.len(),
+        echapper(description)
+    );
+    // Une étiquette sur deux au-delà de douze colonnes, pour qu'elles tiennent sur mobile.
+    let pas = if colonnes.len() > 12 { 2 } else { 1 };
+    for (i, c) in colonnes.iter().enumerate().step_by(pas) {
+        let _ = write!(
+            h,
+            "<text class=\"axe milieu\" x=\"{}\" y=\"12\">{}</text>",
+            pourcent(GOUTTIERE + (i as f64 + 0.5) * case),
+            echapper(c)
+        );
+    }
+    for (n, (libelle, valeurs)) in lignes.iter().enumerate() {
+        let y = TETE + n * RANG;
+        let _ = write!(
+            h,
+            "<text class=\"axe\" x=\"0\" y=\"{}\">{}</text>",
+            y + 17,
+            echapper(libelle)
+        );
+        for (i, v) in valeurs.iter().enumerate() {
+            let niveau = if *v <= 0 { 0 } else { (v * 5 + max - 1) / max };
+            let colonne = colonnes.get(i).map_or("", String::as_str);
+            let _ = write!(
+                h,
+                "<g><title>{} {} : {} {unite}</title><rect class=\"chaleur n{niveau}\" x=\"{}\" y=\"{y}\" width=\"{}\" height=\"{RANG}\" rx=\"4\"/></g>",
+                echapper(libelle),
+                echapper(colonne),
+                entier(*v),
+                pourcent(GOUTTIERE + i as f64 * case),
+                pourcent(case)
+            );
+        }
+    }
+    h.push_str("</svg>");
+    Some(h)
+}
+
 /// Part d'un tout pour une seule mesure, dans une couleur qui n'est celle d'aucune série.
 pub fn jauge(valeur: i64, max: i64, libelle: &str) -> String {
     barre(valeur, max, libelle).replace("class=\"noir\"", "class=\"jauge\"")
@@ -324,6 +381,46 @@ mod tests {
             }
         }
         assert!(h.matches("axe milieu").count() <= ETIQUETTES_MAX);
+    }
+
+    #[test]
+    fn carte_de_chaleur_cinq_niveaux_dans_le_cadre() {
+        let colonnes: Vec<String> = (0..24).map(|h| format!("{h} h")).collect();
+        let mut valeurs = vec![0; 24];
+        valeurs[0] = 1;
+        valeurs[23] = 100;
+        valeurs[10] = 41;
+        let h = chaleur(
+            "d<",
+            "pages",
+            &colonnes,
+            &[("Lun", valeurs), ("Mar", vec![0; 24])],
+        )
+        .unwrap();
+        assert!(h.contains("aria-label=\"d&lt;\""), "{h}");
+        assert!(
+            h.contains("<title>Lun 23 h : 100 pages</title><rect class=\"chaleur n5\""),
+            "{h}"
+        );
+        assert!(
+            h.contains("<title>Lun 10 h : 41 pages</title><rect class=\"chaleur n3\""),
+            "{h}"
+        );
+        // Une valeur minuscule reste visible.
+        assert!(
+            h.contains("<title>Lun 0 h : 1 pages</title><rect class=\"chaleur n1\""),
+            "{h}"
+        );
+        assert!(
+            h.contains("<title>Mar 0 h : 0 pages</title><rect class=\"chaleur n0\""),
+            "{h}"
+        );
+        for morceau in h.split(" x=\"").skip(1) {
+            if let Some(p) = morceau.split('"').next().unwrap().strip_suffix('%') {
+                assert!((0.0..=100.0).contains(&p.parse::<f64>().unwrap()), "{p}");
+            }
+        }
+        assert_eq!(chaleur("d", "pages", &colonnes, &[("Lun", vec![0; 24])]), None);
     }
 
     #[test]

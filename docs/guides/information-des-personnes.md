@@ -10,7 +10,8 @@ l'accès aux données des salariés ; RGPD, articles 13 et 30. Faire relire par 
 
 À partir du ‹date›, ‹organisation› enregistre les impressions réalisées sur ses copieurs.
 
-- **Pourquoi** : suivre les volumes et les coûts d'impression par service et par copieur, ‹autres finalités›.
+- **Pourquoi** : suivre les volumes et les coûts d'impression par service et par copieur, y compris leur répartition
+  par jour et par heure pour dimensionner le parc (sans restitution par personne), ‹autres finalités›.
 - **Ce qui est enregistré pour chaque impression** : votre identifiant, votre poste, le copieur, la date, le nombre de
   pages et de copies, la couleur, le recto-verso, le format, le statut, ‹le nom du document / l'application d'origine,
   selon le réglage retenu›. Le contenu des documents n'est ni lu ni conservé.

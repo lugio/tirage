@@ -25,3 +25,13 @@ quelques secondes, pendant lesquelles la réception attend.
 ## Données personnelles
 - Le journal du service ne cite aucune personne. Celui de nginx, oui : `access_log off` et niveau `crit` sont voulus.
 - Les sauvegardes de la machine contiennent la base : leur durée doit rester cohérente avec la conservation (ADR 0002).
+
+## Réglages d'affichage (`[interface]`)
+
+| Réglage | Par défaut | Rôle |
+|---|---|---|
+| `gros_travail_pages` | 100 | Un travail compte comme gros à partir de ce nombre de pages, copies comprises. |
+| `collecte_silence_minutes` | 120 | Temps ouvré sans travail reçu au bout duquel la collecte est signalée comme muette. |
+| `heure_ouverture`, `heure_fermeture` | 8, 18 | Heures ouvrées, du lundi au vendredi, dans le fuseau configuré. Les jours fériés ne sont pas connus : l'avertissement peut alors être faux. |
+
+L'activité par heure et les gros travaux d'un copieur ne s'affichent qu'à partir de trois personnes sur la période : en dessous, ils décriraient une personne. Ils ne sont jamais restitués par personne ni par service.
