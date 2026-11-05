@@ -59,8 +59,9 @@ pub struct ConfigCouts {
 #[serde(deny_unknown_fields)]
 pub struct TarifFile {
     pub file: String,
-    pub noir: f64,
-    pub couleur: f64,
+    /// Sans prix propre, le tarif général s'applique.
+    pub noir: Option<f64>,
+    pub couleur: Option<f64>,
 }
 
 impl Default for ConfigCouts {
@@ -78,20 +79,23 @@ impl ConfigCouts {
     /// Prix d'une page, en cent-millièmes d'unité monétaire. Le mode inconnu suit le tarif noir.
     pub fn prix(&self, file: &str, couleur: bool) -> Option<i64> {
         let propre = self.files.iter().find(|t| t.file.eq_ignore_ascii_case(file));
-        let p = match (propre, couleur) {
-            (Some(t), true) => Some(t.couleur),
-            (Some(t), false) => Some(t.noir),
-            (None, true) => self.couleur,
-            (None, false) => self.noir,
+        let p = if couleur {
+            propre.and_then(|t| t.couleur).or(self.couleur)
+        } else {
+            propre.and_then(|t| t.noir).or(self.noir)
         };
         p.map(|x| (x * 100_000.0).round() as i64)
     }
 
+    /// Vrai pour un prix par page recevable.
+    pub fn prix_correct(x: f64) -> bool {
+        x.is_finite() && (0.0..=1000.0).contains(&x)
+    }
+
     fn valider(&self) -> Result<(), String> {
-        let correct = |x: f64| x.is_finite() && (0.0..=1000.0).contains(&x);
         let generaux = [self.noir, self.couleur].into_iter().flatten();
-        let par_file = self.files.iter().flat_map(|t| [t.noir, t.couleur]);
-        if !generaux.chain(par_file).all(correct) {
+        let par_file = self.files.iter().flat_map(|t| [t.noir, t.couleur]).flatten();
+        if !generaux.chain(par_file).all(ConfigCouts::prix_correct) {
             return Err("couts : un prix doit être un nombre entre 0 et 1000".into());
         }
         Ok(())
@@ -161,8 +165,8 @@ pub struct ConfigInterface {
     pub http_en_clair: bool,
     /// Fuseau des dates affichées et des bornes de période (nom IANA, ex. « Europe/Paris »).
     pub fuseau: String,
-    /// Un travail compte comme gros à partir de ce nombre de pages (copies comprises).
-    pub gros_travail_pages: u32,
+    /// Un travail en couleur est signalé à partir de ce nombre de pages (copies comprises).
+    pub gros_travail_couleur_pages: u32,
     /// Temps ouvré sans aucun travail reçu au bout duquel la collecte est signalée comme muette.
     pub collecte_silence_minutes: u32,
     /// Heures ouvrées, du lundi au vendredi, dans le fuseau : début inclus, fin exclue.
@@ -177,7 +181,7 @@ impl Default for ConfigInterface {
             inactivite_minutes: 30,
             http_en_clair: false,
             fuseau: "UTC".into(),
-            gros_travail_pages: 100,
+            gros_travail_couleur_pages: 100,
             collecte_silence_minutes: 120,
             heure_ouverture: 8,
             heure_fermeture: 18,
@@ -282,9 +286,10 @@ impl Config {
         if c.interface.session_minutes == 0 || c.interface.inactivite_minutes == 0 {
             return Err("interface : les durées de session doivent être positives".into());
         }
-        if c.interface.gros_travail_pages == 0 || c.interface.collecte_silence_minutes == 0 {
+        if c.interface.gros_travail_couleur_pages == 0 || c.interface.collecte_silence_minutes == 0 {
             return Err(
-                "interface : gros_travail_pages et collecte_silence_minutes doivent être positifs".into(),
+                "interface : gros_travail_couleur_pages et collecte_silence_minutes doivent être positifs"
+                    .into(),
             );
         }
         if c.interface.heure_ouverture >= c.interface.heure_fermeture || c.interface.heure_fermeture > 24 {
@@ -384,7 +389,7 @@ mod tests {
         let base = "ecoute = \"x\"\nbase = \"b\"\n";
         assert!(Config::lire(&format!("{base}[couts]\nnoir = -1.0\n")).is_err());
         assert!(Config::lire(&format!("{base}[conservation]\ndetail_mois = 0\n")).is_err());
-        assert!(Config::lire(&format!("{base}[interface]\ngros_travail_pages = 0\n")).is_err());
+        assert!(Config::lire(&format!("{base}[interface]\ngros_travail_couleur_pages = 0\n")).is_err());
         assert!(Config::lire(&format!("{base}[interface]\ncollecte_silence_minutes = 0\n")).is_err());
         assert!(
             Config::lire(&format!(

@@ -15,14 +15,16 @@ pub enum Rubrique {
     Accueil,
     Palmares,
     Copieurs,
+    Tarifs,
     Journal,
     Aucune,
 }
 
-const NAVIGATION: [(Rubrique, &str, &str); 4] = [
+const NAVIGATION: [(Rubrique, &str, &str); 5] = [
     (Rubrique::Accueil, "/", "Accueil"),
     (Rubrique::Palmares, "/palmares", "Palmarès"),
     (Rubrique::Copieurs, "/copieurs", "Copieurs"),
+    (Rubrique::Tarifs, "/tarifs", "Tarifs"),
     (Rubrique::Journal, "/journal", "Journal des consultations"),
 ];
 
