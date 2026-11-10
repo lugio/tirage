@@ -95,7 +95,8 @@ aucun relevé n'a lieu.
 
 ### Profils de marque
 
-`crates/tirage-collecteur/profils/*.toml` (intégrés à l'exécutable) ; d'autres profils peuvent être déposés dans
+`crates/tirage-collecteur/profils/*.toml` (tous intégrés à l'exécutable, chacun prouvé par un relevé d'essai dans
+`profils/essais/` ; écrire un profil : [guide](printer-profiles.md)) ; d'autres profils peuvent être déposés dans
 `[snmp] dossier_profils`. Un profil donne les OID à **additionner** pour les compteurs total, noir et couleur ; il
 est choisi d'après l'identifiant de l'appareil (`sysObjectID` sous `1.3.6.1.4.1.<entreprise>`), à défaut la
 Printer-MIB standard (total seul). Un compteur dont un seul OID manque n'est pas publié (jamais de total partiel).

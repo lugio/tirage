@@ -4,6 +4,10 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), ver
 
 ## [Non publié]
 
+### Ajouté
+- Profils de copieurs ouverts aux contributions : guide [`docs/guides/printer-profiles.md`](docs/guides/printer-profiles.md), modèle de ticket « Printer profile », relevé d'essai obligatoire par profil (`profils/essais/`), vérifié par la CI (choix automatique du profil, compteurs attendus, noir + couleur = total, aucun texte ni adresse dans un relevé contribué).
+- Tout fichier déposé dans `crates/tirage-collecteur/profils/` est intégré à l'exécutable, sans ligne de code à ajouter.
+
 ## [0.2.1] - 2026-11-10
 
 ### Ajouté

@@ -8,13 +8,8 @@ use std::path::Path;
 use serde::Deserialize;
 use tirage_snmp::Oid;
 
-const INTEGRES: &[(&str, &str)] = &[
-    ("printer-mib.toml", include_str!("../../profils/printer-mib.toml")),
-    (
-        "konica-minolta.toml",
-        include_str!("../../profils/konica-minolta.toml"),
-    ),
-];
+/// Profils de `profils/*.toml`, intégrés à la compilation (`build.rs`) : (nom du fichier, contenu).
+pub const INTEGRES: &[(&str, &str)] = include!(concat!(env!("OUT_DIR"), "/profils_integres.rs"));
 
 /// Nom du profil de repli (Printer-MIB standard).
 pub const REPLI: &str = "printer-mib";
@@ -138,7 +133,8 @@ mod tests {
     #[test]
     fn profils_integres_lisibles() {
         let p = Profils::charger(None).unwrap();
-        assert_eq!(p.noms(), vec!["printer-mib", "konica-minolta"]);
+        assert!(p.par_nom("konica-minolta").is_some());
+        assert_eq!(p.noms().len(), INTEGRES.len());
         assert_eq!(p.repli().compteurs.total.len(), 1);
     }
 
@@ -172,7 +168,7 @@ mod tests {
         let p = Profils::charger(Some(d.path())).unwrap();
         assert_eq!(p.par_nom("exemple").unwrap().compteurs.noir.len(), 2);
         assert_eq!(p.par_nom("konica-minolta").unwrap().compteurs.couleur.len(), 1);
-        assert_eq!(p.noms().len(), 3);
+        assert_eq!(p.noms().len(), INTEGRES.len() + 1);
     }
 
     #[test]
