@@ -118,4 +118,10 @@ comme décrit dans [SECURITY.md](SECURITY.md).
 
 ## Licence
 
-[AGPL-3.0-only](LICENSE)
+Copyright © 2026 lugio. tirage est un logiciel libre sous [GNU Affero General Public License v3.0 seule](LICENSE)
+(`AGPL-3.0-only`) : vous pouvez l'utiliser, l'étudier, le modifier et le partager. Si vous le modifiez et le faites
+utiliser par d'autres à travers un réseau, vous devez leur proposer votre code source modifié — chaque page de
+l'interface renvoie à son code source dans ce but.
+
+Une **licence commerciale** (sans les obligations de l'AGPL) est possible sur demande : ouvrir un ticket intitulé
+« Licence commerciale ».

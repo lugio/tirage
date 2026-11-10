@@ -4,6 +4,10 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), ver
 
 ## [Non publié]
 
+### Ajouté
+- Licence commerciale possible sur demande, en plus de l'`AGPL-3.0-only` ; accord de contribution annoncé dans `CONTRIBUTING.md`.
+- Interface : pied de page avec la version et le lien vers le code source (article 13 de l'AGPL).
+
 ## [0.2.0] - 2026-11-10
 Première version avec archives prêtes à l'emploi.
 

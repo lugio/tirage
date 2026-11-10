@@ -82,6 +82,7 @@ h1 { margin: .25rem 0 1rem; font-size: clamp(1.3rem, 1rem + 1.2vw, 1.75rem); }
 h2 { margin: 0 0 .75rem; font-size: 1.05rem; }
 main { max-width: 100rem; margin: 0 auto; padding: 1.25rem var(--marge) 2.5rem; }
 main > h2 { margin-top: 1.5rem; }
+.pied { max-width: 100rem; margin: 0 auto; padding: 0 var(--marge) 1.5rem; font-size: .8rem; color: var(--texte-doux); }
 
 /* En-tête et navigation : passe à la ligne sur petit écran */
 header {
