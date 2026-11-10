@@ -60,3 +60,25 @@ jobs:
         with: { fetch-depth: 0 }
       - uses: gitleaks/gitleaks-action@v3
         env: { GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}" }
+
+  scripts:
+    name: Scripts d'installation
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+      - name: Syntaxe PowerShell (Windows PowerShell 5.1 et 7)
+        shell: pwsh
+        run: |
+          $ko = 0
+          foreach ($f in Get-ChildItem deploiement/windows/*.ps1) {
+            $e = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$e) | Out-Null
+            if ($e) { $e | ForEach-Object { Write-Host "::error file=$($f.Name)::$($_.Message)" }; $ko++ }
+            powershell -NoProfile -Command "`$e=`$null; [void][System.Management.Automation.Language.Parser]::ParseFile('$($f.FullName)', [ref]`$null, [ref]`$e); if (`$e) { exit 1 }"
+            if ($LASTEXITCODE -ne 0) { Write-Host "::error file=$($f.Name)::refusé par Windows PowerShell 5.1"; $ko++ }
+            if (([IO.File]::ReadAllBytes($f.FullName)[0..2]) -join ',' -ne '239,187,191') { Write-Host "::error file=$($f.Name)::BOM UTF-8 manquant (accents illisibles sous PowerShell 5.1)"; $ko++ }
+          }
+          exit $ko
+      - name: Syntaxe shell
+        shell: bash
+        run: sh -n deploiement/linux/installer-serveur.sh

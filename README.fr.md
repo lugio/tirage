@@ -69,21 +69,26 @@ Deux binaires autonomes, sans dépendance à l'exécution. Détail : [ADR 0001](
 
 ## Démarrer
 
+Télécharger les archives sur la page [Releases](https://github.com/lugio/tirage/releases), puis :
+
 ```sh
-cargo build --release --workspace
-cargo test --workspace
+# 1. Serveur (Linux, systemd) : crée tout et affiche une fois le jeton du collecteur
+tar -xzf tirage-serveur-X.Y.Z-linux-x86_64.tar.gz && cd tirage-serveur-X.Y.Z-linux-x86_64
+sudo ./installer-serveur.sh
 ```
 
-1. **Serveur** : [docs/guides/serveur.md](docs/guides/serveur.md) (service systemd et exemple nginx dans
-   [`deploiement/`](deploiement/), configuration d'après
-   [`serveur.exemple.toml`](crates/tirage-serveur/serveur.exemple.toml)). Jeton d'un collecteur :
-   `tirage-serveur --nouveau-jeton NOM`.
-2. **Annuaire** : [docs/guides/annuaire.md](docs/guides/annuaire.md).
-3. **Collecteur** : sur le serveur d'impression, configuration d'après
-   [`collecteur.exemple.toml`](crates/tirage-collecteur/collecteur.exemple.toml), puis
-   `tirage-collecteur --installer` pour inscrire le service Windows. Essai :
-   [docs/guides/essai-collecteur.md](docs/guides/essai-collecteur.md).
-4. **Personnes** : les informer avant la collecte, [docs/guides/information-des-personnes.md](docs/guides/information-des-personnes.md).
+```powershell
+# 2. Collecteur : sur le serveur d'impression Windows, PowerShell administrateur ; coller le jeton quand il est demandé
+powershell -ExecutionPolicy Bypass -File .\installer-collecteur.ps1 -Serveur https://tirage.example.org
+```
+
+3. **Interface** : ajouter la section `[annuaire]` (LDAP ou Active Directory) à `/etc/tirage/serveur.toml` et redémarrer.
+
+Guide pas à pas, HTTPS, copieurs, mises à jour et retrait : **[docs/guides/installation.md](docs/guides/installation.md)**.
+Informer les personnes concernées avant la collecte :
+[docs/guides/information-des-personnes.md](docs/guides/information-des-personnes.md).
+
+Depuis les sources : `cargo build --release --workspace` (chaîne fixée dans `rust-toolchain.toml`).
 
 ## Organisation du dépôt
 
