@@ -4,6 +4,9 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), ver
 
 ## [Non publié]
 
+## [0.3.0] - 2026-11-10
+Profils de copieurs ouverts aux contributions.
+
 ### Ajouté
 - Profils de copieurs ouverts aux contributions : guide [`docs/guides/printer-profiles.md`](docs/guides/printer-profiles.md), modèle de ticket « Printer profile », relevé d'essai obligatoire par profil (`profils/essais/`), vérifié par la CI (choix automatique du profil, compteurs attendus, noir + couleur = total, aucun texte ni adresse dans un relevé contribué).
 - Tout fichier déposé dans `crates/tirage-collecteur/profils/` est intégré à l'exécutable, sans ligne de code à ajouter.
@@ -68,7 +71,8 @@ Première version publiée.
 - Connexion : l'appartenance au groupe se lit depuis le groupe (`member`, groupes imbriqués compris). Un compte de lecture sans droit sur `memberOf` faisait refuser tout le monde, sans erreur.
 - La taille d'un travail ne retombe plus à 0 quand le spouleur le retire de la file.
 
-[Non publié]: https://github.com/lugio/tirage/compare/v0.2.1...HEAD
+[Non publié]: https://github.com/lugio/tirage/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/lugio/tirage/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/lugio/tirage/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/lugio/tirage/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/lugio/tirage/releases/tag/v0.1.0
