@@ -3,6 +3,8 @@
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), versions selon [SemVer](https://semver.org/lang/fr/).
 
 ## [Non publié]
+### Modifié
+- Interface : logo dans l'en-tête et en icône d'onglet (`/logo.svg`) ; couleur de la marque passée du vert à l'ardoise, distincte des séries N&B et couleur des graphiques.
 
 ## [0.1.0] - 2026-11-10
 Première version publiée.
