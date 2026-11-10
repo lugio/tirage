@@ -184,6 +184,6 @@ async fn rafraichir_les_fiches(a: Arc<dyn Annuaire>, base: Arc<Mutex<Base>>, min
 mod tests {
     #[test]
     fn version_lisible() {
-        assert!(super::texte_version().starts_with("tirage-serveur 0.1.0"));
+        assert!(super::texte_version().starts_with(concat!("tirage-serveur ", env!("CARGO_PKG_VERSION"))));
     }
 }
