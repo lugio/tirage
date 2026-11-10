@@ -3,7 +3,7 @@
 - Statut : acceptée (04/11/2026)
 
 ## Contexte
-Les restitutions se font par service et par cabinet, et le détail par utilisateur est réservé à un groupe. Tout passe
+Les restitutions se font par service et par site, et le détail par utilisateur est réservé à un groupe. Tout passe
 par l'annuaire de l'organisation, en lecture seule. Qui imprime quoi étant une donnée personnelle (ADR 0002), l'outil
 lit le minimum et garde la trace de ceux qui consultent.
 

@@ -31,7 +31,7 @@
 - **Copieurs relevés en SNMP** : compteurs N&amp;B et couleur, toners et autres consommables, alertes traduites et
   classées ; pages réellement produites entre deux relevés, copies comprises. Printer-MIB (RFC 3805) et profils de
   marque en fichiers TOML, ajoutés sans recompiler : [ajouter sa marque](docs/guides/printer-profiles.md).
-- **Tableaux** : par utilisateur, service, cabinet, copieur, format, application ; activité par jour et par heure ;
+- **Tableaux** : par utilisateur, service, site, copieur, format, application ; activité par jour et par heure ;
   comparaison de périodes ; feuilles évitées par le recto-verso ; palmarès ; export CSV.
 - **Coûts** : prix par page N&amp;B et couleur, général ou par copieur, saisi dans l'interface.
 - **Connexion par l'annuaire** : LDAP ou Active Directory, accès limité à un groupe ; chaque consultation du détail

@@ -11,7 +11,7 @@ nom = "impression-1"
 # Empreinte du jeton fictif « jeton-exemple-a-remplacer ».
 jeton_sha256 = "fe07e7e309d0f68ee75070ca27bae0c82de85d018d82341e91175d7bc718fdf1"
 
-# Annuaire, en lecture seule : service et cabinet des personnes, connexion à l'interface.
+# Annuaire, en lecture seule : service et site des personnes, connexion à l'interface.
 # Sans cette section, l'interface web n'existe pas : seule la réception des collecteurs tourne.
 [annuaire]
 url = "ldaps://annuaire.example.org:636"
@@ -25,7 +25,7 @@ mot_de_passe_fichier = "/etc/tirage/annuaire.secret"
 groupe_autorise = "CN=Lecteurs-Impressions,OU=Groupes,DC=example,DC=org"
 # Attribut LDAP, ou « dn:ou » pour la première unité d'organisation du DN.
 attribut_service = "department"
-attribut_cabinet = "company"
+attribut_site = "company"
 # Valeurs par défaut :
 # attribut_identifiant = "sAMAccountName"
 # attribut_nom = "displayName"

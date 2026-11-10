@@ -54,7 +54,7 @@ Le relevé est en SNMP, lecture seule, depuis le serveur d'impression (UDP 161 v
 ## 3. Interface
 
 Recopier la section `[annuaire]` de `serveur.exemple.toml` dans `/etc/tirage/serveur.toml` et l'adapter (adresse,
-compte de lecture, groupe autorisé, attributs service et cabinet ; [guide de l'annuaire](annuaire.md)), mettre le mot
+compte de lecture, groupe autorisé, attributs service et site ; [guide de l'annuaire](annuaire.md)), mettre le mot
 de passe du compte dans le fichier désigné (`chmod 600`, propriétaire `tirage`), puis :
 
 ```sh

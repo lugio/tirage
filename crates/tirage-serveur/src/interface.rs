@@ -388,7 +388,7 @@ pub fn routes<S: Clone + Send + Sync + 'static>(c: Contexte) -> Router<S> {
         .route("/copieurs", get(copieurs))
         .route("/copieurs/{copieur}", get(vue_copieur))
         .route("/services/{service}", get(vue_service))
-        .route("/cabinets/{cabinet}", get(vue_cabinet))
+        .route("/sites/{site}", get(vue_site))
         .route("/utilisateurs/{utilisateur}", get(detail))
         .route("/tarifs", get(tarifs).post(enregistrer_tarifs))
         .route("/journal", get(journal))
@@ -1133,7 +1133,7 @@ fn cellule_cle(axe: Axe, cle: &str, periode: &Periode) -> Cellule {
         Axe::Utilisateur => "/utilisateurs",
         Axe::Format | Axe::Application => return Cellule::texte(cle),
         Axe::Service => Vue::Service.chemin(),
-        Axe::Cabinet => Vue::Cabinet.chemin(),
+        Axe::Site => Vue::Site.chemin(),
         Axe::Copieur => Vue::Copieur.chemin(),
     };
     Cellule::Lien {
@@ -1179,11 +1179,11 @@ fn tableau_axe(axe: Axe, lignes: &[Ligne], t: &Ligne, devise: &str, periode: &Pe
     tableau.fin()
 }
 
-/// Vue d'un service, d'un cabinet ou d'un copieur.
+/// Vue d'un service, d'un site ou d'un copieur.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Vue {
     Service,
-    Cabinet,
+    Site,
     Copieur,
 }
 
@@ -1191,7 +1191,7 @@ impl Vue {
     fn chemin(self) -> &'static str {
         match self {
             Vue::Service => "/services",
-            Vue::Cabinet => "/cabinets",
+            Vue::Site => "/sites",
             Vue::Copieur => "/copieurs",
         }
     }
@@ -1199,7 +1199,7 @@ impl Vue {
     fn action(self) -> &'static str {
         match self {
             Vue::Service => "vue_service",
-            Vue::Cabinet => "vue_cabinet",
+            Vue::Site => "vue_site",
             Vue::Copieur => "vue_copieur",
         }
     }
@@ -1207,7 +1207,7 @@ impl Vue {
     fn titre(self) -> &'static str {
         match self {
             Vue::Service => "Service",
-            Vue::Cabinet => "Cabinet",
+            Vue::Site => "Site",
             Vue::Copieur => "Copieur",
         }
     }
@@ -1215,7 +1215,7 @@ impl Vue {
     fn filtre(self, valeur: &str) -> Filtre<'_> {
         match self {
             Vue::Service => Filtre::Service(valeur),
-            Vue::Cabinet => Filtre::Cabinet(valeur),
+            Vue::Site => Filtre::Site(valeur),
             Vue::Copieur => Filtre::Copieur(valeur),
         }
     }
@@ -1224,7 +1224,7 @@ impl Vue {
     fn axes(self) -> (Axe, Axe) {
         match self {
             Vue::Service => (Axe::Utilisateur, Axe::Copieur),
-            Vue::Cabinet => (Axe::Service, Axe::Copieur),
+            Vue::Site => (Axe::Service, Axe::Copieur),
             Vue::Copieur => (Axe::Utilisateur, Axe::Service),
         }
     }
@@ -1239,13 +1239,13 @@ async fn vue_service(
     vue(c, s, Vue::Service, valeur, d).await
 }
 
-async fn vue_cabinet(
+async fn vue_site(
     State(c): State<Contexte>,
     Extension(s): Extension<Session>,
     Path(valeur): Path<String>,
     Query(d): Query<Demande>,
 ) -> Response {
-    vue(c, s, Vue::Cabinet, valeur, d).await
+    vue(c, s, Vue::Site, valeur, d).await
 }
 
 async fn vue_copieur(
@@ -2066,10 +2066,10 @@ async fn detail(
     };
     let mut h = personne.as_ref().map_or(String::new(), |p| {
         format!(
-            "<p>{} — service : {} — cabinet : {}{}</p>",
+            "<p>{} — service : {} — site : {}{}</p>",
             echapper(p.nom.as_deref().unwrap_or("nom inconnu")),
             echapper(p.service.as_deref().unwrap_or("inconnu")),
-            echapper(p.cabinet.as_deref().unwrap_or("inconnu")),
+            echapper(p.site.as_deref().unwrap_or("inconnu")),
             if p.trouve { "" } else { " — absent de l'annuaire" },
         )
     });
@@ -2165,7 +2165,7 @@ fn libelle_action(action: &str) -> String {
         "journal" => "Journal",
         "detail_utilisateur" => "Fiche d'une personne",
         "vue_service" => "Vue d'un service",
-        "vue_cabinet" => "Vue d'un cabinet",
+        "vue_site" => "Vue d'un site",
         "vue_copieur" => "Vue d'un copieur",
         "tarifs_modifies" => "Tarifs modifiés",
         autre => autre,
@@ -2282,12 +2282,12 @@ mod tests {
         base.personne_trouvee(
             "a.exemple",
             Some("A <b>Exemple</b>"),
-            Some("Audit"),
+            Some("Atelier"),
             Some("Est"),
             0,
         )
         .unwrap();
-        base.personne_trouvee("b.exemple", Some("B Exemple"), Some("Paie"), Some("Est"), 0)
+        base.personne_trouvee("b.exemple", Some("B Exemple"), Some("Commercial"), Some("Est"), 0)
             .unwrap();
     }
 
@@ -2413,8 +2413,8 @@ mod tests {
             "/copieurs",
             "/copieurs/COPIEUR-1",
             "/tarifs",
-            "/services/Audit",
-            "/cabinets/Est",
+            "/services/Atelier",
+            "/sites/Est",
             "/rapports/service",
             "/rapports/utilisateur/csv",
             "/utilisateurs/a.exemple",
@@ -2664,7 +2664,7 @@ mod tests {
             .get(&format!("/rapports/service?{NOVEMBRE}"), Some(&cookie))
             .await;
         assert_eq!(r.code, StatusCode::OK);
-        assert!(r.texte.contains("Audit") && r.texte.contains("Paie"));
+        assert!(r.texte.contains("Atelier") && r.texte.contains("Commercial"));
         assert!(r.texte.contains("Non rattaché"), "personne sans fiche visible");
 
         let r = b
@@ -2679,7 +2679,7 @@ mod tests {
             "nom de l'annuaire échappé"
         );
 
-        for axe in ["cabinet", "copieur", "format"] {
+        for axe in ["site", "copieur", "format"] {
             let r = b.get(&format!("/rapports/{axe}?{NOVEMBRE}"), Some(&cookie)).await;
             assert_eq!(r.code, StatusCode::OK, "{axe}");
         }
@@ -3072,7 +3072,9 @@ mod tests {
         let b = banc();
         charger_jeu(&b);
         let cookie = b.connecter().await;
-        let r = b.get(&format!("/services/Audit?{NOVEMBRE}"), Some(&cookie)).await;
+        let r = b
+            .get(&format!("/services/Atelier?{NOVEMBRE}"), Some(&cookie))
+            .await;
         assert_eq!(r.code, StatusCode::OK);
         assert!(
             r.texte.contains("a.exemple") && !r.texte.contains("b.exemple"),
@@ -3084,7 +3086,7 @@ mod tests {
         let j = b.journal();
         assert!(
             j.iter()
-                .any(|l| l.1 == "vue_service" && l.2.as_deref().is_some_and(|c| c.starts_with("Audit ")))
+                .any(|l| l.1 == "vue_service" && l.2.as_deref().is_some_and(|c| c.starts_with("Atelier ")))
         );
 
         let r = b
@@ -3096,9 +3098,9 @@ mod tests {
             r.texte
         );
 
-        let r = b.get(&format!("/cabinets/Est?{NOVEMBRE}"), Some(&cookie)).await;
+        let r = b.get(&format!("/sites/Est?{NOVEMBRE}"), Some(&cookie)).await;
         assert!(
-            r.texte.contains("<b>160</b>") && r.texte.contains("Paie"),
+            r.texte.contains("<b>160</b>") && r.texte.contains("Commercial"),
             "{}",
             r.texte
         );
@@ -3120,7 +3122,7 @@ mod tests {
 
         // Période invalide : ni trace de lecture ni donnée.
         let avant = b.journal().len();
-        let r = b.get("/services/Audit?du=x", Some(&cookie)).await;
+        let r = b.get("/services/Atelier?du=x", Some(&cookie)).await;
         assert_eq!(r.code, StatusCode::BAD_REQUEST);
         assert_eq!(b.journal().len(), avant);
     }
@@ -3516,7 +3518,7 @@ mod tests {
             t.envoye_ms = AN_DERNIER;
             t.nom_document = Some("document-confidentiel-fictif.pdf".into());
             base.enregistrer(&Evenement::Travail(t), 0).unwrap();
-            base.personne_trouvee("a.exemple", Some("A Exemple"), Some("Audit"), None, 0)
+            base.personne_trouvee("a.exemple", Some("A Exemple"), Some("Atelier"), None, 0)
                 .unwrap();
             let limite = MAINTENANT - 365 * 86_400_000;
             base.purger(limite, limite, |ms| {
@@ -3531,7 +3533,7 @@ mod tests {
             .get("/rapports/service?du=2025-10-01&au=2025-10-31", Some(&cookie))
             .await;
         assert!(
-            r.texte.contains("Audit") && r.texte.contains("<td class=\"n\">6</td>"),
+            r.texte.contains("Atelier") && r.texte.contains("<td class=\"n\">6</td>"),
             "{}",
             r.texte
         );
@@ -3541,7 +3543,7 @@ mod tests {
         let r = b
             .get("/rapports/service?du=2025-10-05&au=2025-10-20", Some(&cookie))
             .await;
-        assert!(!r.texte.contains("Audit"));
+        assert!(!r.texte.contains("Atelier"));
 
         // Plus personne par utilisateur, ni palmarès, ni détail.
         for chemin in [

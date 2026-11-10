@@ -10,7 +10,7 @@ Sans section `[annuaire]`, le serveur ne fait que recevoir les événements : au
 4. Le **certificat de l'autorité** qui a signé celui de l'annuaire, en PEM (`ca`), s'il n'est pas dans le magasin du système.
 
 ## Configurer
-Voir `crates/tirage-serveur/serveur.exemple.toml`. Pour `attribut_service` et `attribut_cabinet`, vérifier dans
+Voir `crates/tirage-serveur/serveur.exemple.toml`. Pour `attribut_service` et `attribut_site`, vérifier dans
 l'annuaire quel attribut porte réellement l'information, ou utiliser `dn:ou` (première unité d'organisation du DN).
 
 ## HTTPS

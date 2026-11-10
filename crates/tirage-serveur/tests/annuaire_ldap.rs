@@ -13,9 +13,9 @@ use tirage_serveur::config::Config;
 const COMPTE: &str = "CN=lecture,DC=example,DC=org";
 const MDP_COMPTE: &str = "mot-de-passe-du-compte-fictif";
 const GROUPE: &str = "CN=Lecteurs,OU=Groupes,DC=example,DC=org";
-const DN_MEMBRE: &str = "CN=Membre,OU=Audit,DC=example,DC=org";
+const DN_MEMBRE: &str = "CN=Membre,OU=Atelier,DC=example,DC=org";
 const MDP_MEMBRE: &str = "mot-de-passe-fictif";
-const DN_SPECIAL: &str = "CN=Membre (Paie)*,OU=Audit,DC=example,DC=org";
+const DN_SPECIAL: &str = "CN=Membre (Commercial)*,OU=Atelier,DC=example,DC=org";
 const REGLE_CHAINE: &str = "1.2.840.113556.1.4.1941";
 
 // --- BER minimal ---
@@ -186,7 +186,7 @@ fn servir<S: Read + Write>(mut flux: S, trace: &Mutex<Trace>) {
                                 &[
                                     ("sAMAccountName", "Membre"),
                                     ("displayName", "Membre Exemple"),
-                                    ("department", "Audit"),
+                                    ("department", "Atelier"),
                                 ],
                             ),
                         ));
@@ -198,7 +198,7 @@ fn servir<S: Read + Write>(mut flux: S, trace: &Mutex<Trace>) {
                         rep.push(message(
                             id,
                             entree(
-                                "CN=Autre,OU=Paie,DC=example,DC=org",
+                                "CN=Autre,OU=Commercial,DC=example,DC=org",
                                 &[("sAMAccountName", "autre.exemple")],
                             ),
                         ));
@@ -374,16 +374,16 @@ fn fiches_nominatives_seulement() {
     // Casse de la configuration différente de celle rendue par l'annuaire : même attribut.
     let b = banc_en_clair(
         MDP_COMPTE,
-        "attribut_cabinet = \"dn:ou\"\nattribut_service = \"DEPARTMENT\"\n",
+        "attribut_site = \"dn:ou\"\nattribut_service = \"DEPARTMENT\"\n",
     );
     let f = b
         .annuaire
         .fiches(&["membre".into(), "autre.exemple".into(), "absent".into()])
         .unwrap();
     assert_eq!(f.len(), 2);
-    assert_eq!(f[0].service.as_deref(), Some("Audit"));
-    assert_eq!(f[0].cabinet.as_deref(), Some("Audit"));
-    assert_eq!(f[1].cabinet.as_deref(), Some("Paie"));
+    assert_eq!(f[0].service.as_deref(), Some("Atelier"));
+    assert_eq!(f[0].site.as_deref(), Some("Atelier"));
+    assert_eq!(f[1].site.as_deref(), Some("Commercial"));
     assert_eq!(f[1].nom, None);
     // Recherche par identifiants, pas de lecture de tout l'annuaire.
     let t = b.trace.lock().unwrap();
@@ -560,12 +560,12 @@ fn programme_complet_connexion_fiche_et_journal() {
     let mut detail = String::new();
     for _ in 0..100 {
         detail = voir("/utilisateurs/membre").1;
-        if detail.contains("service : Audit") {
+        if detail.contains("service : Atelier") {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    assert!(detail.contains("service : Audit"), "{detail}");
+    assert!(detail.contains("service : Atelier"), "{detail}");
     assert!(detail.contains("document-fictif.pdf"));
 
     let (_, j) = voir("/journal");
