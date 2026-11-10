@@ -35,5 +35,6 @@
 - Interface fluide et responsive, thème sombre selon le système. Style dans `style.css`, composants partagés dans `interface/gabarit.rs` et `interface/graphique.rs`.
 
 ### Corrigé
+- Sécurité : SQLite embarqué mis à jour (rusqlite 0.41, libsqlite3-sys 0.39), qui corrige RUSTSEC-2026-0459 (lecture de mémoire non initialisée avec un fichier `-wal` fabriqué ; attaque locale).
 - Connexion : l'appartenance au groupe se lit depuis le groupe (`member`, groupes imbriqués compris). Un compte de lecture sans droit sur `memberOf` faisait refuser tout le monde, sans erreur.
 - La taille d'un travail ne retombe plus à 0 quand le spouleur le retire de la file.
