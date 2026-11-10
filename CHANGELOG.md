@@ -3,6 +3,10 @@
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), versions selon [SemVer](https://semver.org/lang/fr/).
 
 ## [Non publié]
+
+## [0.2.0] - 2026-11-10
+Première version avec archives prêtes à l'emploi.
+
 ### Ajouté
 - Installation simple : archives prêtes à l'emploi publiées à chaque version (collecteur Windows, serveur Linux, empreintes), scripts `installer-serveur.sh` (crée tout, déclare le collecteur et donne son jeton ; relancé, met à jour sans toucher à la configuration) et `installer-collecteur.ps1` / `retirer-collecteur.ps1`, guide `docs/guides/installation.md`.
 
@@ -51,5 +55,6 @@ Première version publiée.
 - Connexion : l'appartenance au groupe se lit depuis le groupe (`member`, groupes imbriqués compris). Un compte de lecture sans droit sur `memberOf` faisait refuser tout le monde, sans erreur.
 - La taille d'un travail ne retombe plus à 0 quand le spouleur le retire de la file.
 
-[Non publié]: https://github.com/lugio/tirage/compare/v0.1.0...HEAD
+[Non publié]: https://github.com/lugio/tirage/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/lugio/tirage/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/lugio/tirage/releases/tag/v0.1.0
