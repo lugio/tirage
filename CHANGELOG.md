@@ -3,6 +3,9 @@
 Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), versions selon [SemVer](https://semver.org/lang/fr/).
 
 ## [Non publié]
+### Ajouté
+- Installation simple : archives prêtes à l'emploi publiées à chaque version (collecteur Windows, serveur Linux, empreintes), scripts `installer-serveur.sh` (crée tout, déclare le collecteur et donne son jeton ; relancé, met à jour sans toucher à la configuration) et `installer-collecteur.ps1` / `retirer-collecteur.ps1`, guide `docs/guides/installation.md`.
+
 ### Modifié
 - Interface : logo dans l'en-tête et en icône d'onglet (`/logo.svg`) ; couleur de la marque passée du vert à l'ardoise, distincte des séries N&B et couleur des graphiques.
 

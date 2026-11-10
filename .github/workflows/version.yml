@@ -1,0 +1,116 @@
+name: Version
+
+# Un tag vX.Y.Z (égal à la version de Cargo.toml) construit, vérifie et publie :
+#   tirage-collecteur-X.Y.Z-windows-x86_64.zip  — programme, scripts d'installation et de retrait, exemple de configuration
+#   tirage-serveur-X.Y.Z-linux-x86_64.tar.gz    — programme, script d'installation, service systemd, exemples
+#   SHA256SUMS                                  — empreintes des archives
+# Notes de version : la section du tag dans CHANGELOG.md.
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag existant à (re)publier, ex. v0.1.0"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: version-${{ github.event.inputs.tag || github.ref_name }}
+
+env:
+  CARGO_TERM_COLOR: always
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  controle:
+    name: Tag et version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with: { ref: "${{ env.TAG }}" }
+      - id: v
+        name: Le tag correspond à Cargo.toml et au CHANGELOG
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          [ "v$version" = "$TAG" ] || { echo "::error::tag $TAG, Cargo.toml $version"; exit 1; }
+          grep -q "^## \[$version\]" CHANGELOG.md || { echo "::error::CHANGELOG.md sans section [$version]"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  collecteur:
+    name: Collecteur Windows
+    needs: controle
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+        with: { ref: "${{ env.TAG }}" }
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - run: cargo test --locked -p tirage-collecteur -p tirage-file -p tirage-modele -p tirage-snmp
+      - run: cargo build --locked --release -p tirage-collecteur
+      - name: Archive
+        shell: pwsh
+        run: |
+          $nom = "tirage-collecteur-${{ needs.controle.outputs.version }}-windows-x86_64"
+          New-Item -ItemType Directory $nom | Out-Null
+          Copy-Item target/release/tirage-collecteur.exe, deploiement/windows/*.ps1, crates/tirage-collecteur/collecteur.exemple.toml, LICENSE $nom
+          Push-Location $nom
+          "$((Get-FileHash tirage-collecteur.exe -Algorithm SHA256).Hash.ToLower())  tirage-collecteur.exe" | Set-Content -Encoding ascii SHA256SUMS
+          Pop-Location
+          Compress-Archive $nom "$nom.zip"
+      - uses: actions/upload-artifact@v7
+        with: { name: collecteur, path: "*.zip", if-no-files-found: error }
+
+  serveur:
+    name: Serveur Linux
+    needs: controle
+    # La plus ancienne image disponible : le programme suit sa glibc, il tourne donc aussi sur les distributions plus récentes.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+        with: { ref: "${{ env.TAG }}" }
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - run: cargo test --locked -p tirage-serveur
+      - run: cargo build --locked --release -p tirage-serveur
+      - name: Archive
+        run: |
+          nom="tirage-serveur-${{ needs.controle.outputs.version }}-linux-x86_64"
+          mkdir "$nom"
+          strip target/release/tirage-serveur
+          cp target/release/tirage-serveur deploiement/linux/installer-serveur.sh deploiement/tirage-serveur.service \
+             deploiement/nginx-tirage.conf.exemple crates/tirage-serveur/serveur.exemple.toml LICENSE "$nom/"
+          (cd "$nom" && sha256sum tirage-serveur > SHA256SUMS && ./tirage-serveur --version)
+          tar -czf "$nom.tar.gz" "$nom"
+      - uses: actions/upload-artifact@v7
+        with: { name: serveur, path: "*.tar.gz", if-no-files-found: error }
+
+  publier:
+    name: Publication
+    needs: [controle, collecteur, serveur]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with: { ref: "${{ env.TAG }}" }
+      - uses: actions/download-artifact@v8
+        with: { path: dist, merge-multiple: true }
+      - name: Empreintes et notes
+        run: |
+          (cd dist && sha256sum ./*.zip ./*.tar.gz | sed 's# \./# #' > SHA256SUMS && cat SHA256SUMS)
+          v="${{ needs.controle.outputs.version }}"
+          awk -v t="## [$v]" 'index($0, t) == 1 {on = 1; next} /^## \[/ {on = 0} on' CHANGELOG.md > notes.md
+          printf '\n---\nInstallation : [docs/guides/installation.md](https://github.com/%s/blob/%s/docs/guides/installation.md)\n' \
+            "$GITHUB_REPOSITORY" "$TAG" >> notes.md
+      - name: Version GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --title "tirage ${{ needs.controle.outputs.version }}" --notes-file notes.md --verify-tag
+          fi

@@ -33,8 +33,17 @@ Windows.
 - **Dependencies** — permissive licences only (see `deny.toml`).
 - **User-visible change** — add a line to `CHANGELOG.md` under « Non publié ».
 
+## Releasing (maintainers)
+
+1. In one pull request: bump `version` in `Cargo.toml` (SemVer), rename « Non publié » in `CHANGELOG.md` to
+   `[X.Y.Z] - YYYY-MM-DD` and add a fresh « Non publié » section above it.
+2. After merging: `git tag -a vX.Y.Z -m "tirage X.Y.Z"` on `main`, then `git push origin vX.Y.Z`.
+3. The [Version workflow](.github/workflows/version.yml) checks that the tag matches `Cargo.toml` and the changelog,
+   runs the tests, builds the Windows collector and the Linux server archives, and publishes the release with
+   `SHA256SUMS` and the changelog section as notes.
+
 ## Résumé en français
 
 Une branche et une PR par changement, CI verte avant fusion, messages `type(portée): résumé`. **Aucune donnée réelle** :
 exemples, jeux d'essai et captures fictifs. Rien de propre à un site dans le code ni les valeurs par défaut.
-Dépendances aux licences permissives. Toute évolution visible va dans le `CHANGELOG.md`.
+Dépendances aux licences permissives. Toute évolution visible va dans le `CHANGELOG.md`. Version : PR qui monte `Cargo.toml` et date le `CHANGELOG.md`, puis tag `vX.Y.Z` : la CI publie les archives.

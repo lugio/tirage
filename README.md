@@ -69,21 +69,26 @@ Two single binaries, no runtime dependency. Details: [ADR 0001](docs/architectur
 
 ## Getting started
 
+Download the archives from [Releases](https://github.com/lugio/tirage/releases), then:
+
 ```sh
-cargo build --release --workspace
-cargo test --workspace
+# 1. Server (Linux, systemd) — creates everything and prints the collector token once
+tar -xzf tirage-serveur-X.Y.Z-linux-x86_64.tar.gz && cd tirage-serveur-X.Y.Z-linux-x86_64
+sudo ./installer-serveur.sh
 ```
 
-1. **Server** — follow [docs/guides/serveur.md](docs/guides/serveur.md) (systemd unit and nginx example in
-   [`deploiement/`](deploiement/), configuration from
-   [`serveur.exemple.toml`](crates/tirage-serveur/serveur.exemple.toml)). Create a collector token with
-   `tirage-serveur --nouveau-jeton NAME`.
-2. **Directory** — [docs/guides/annuaire.md](docs/guides/annuaire.md).
-3. **Collector** — on the print server, configure from
-   [`collecteur.exemple.toml`](crates/tirage-collecteur/collecteur.exemple.toml), then
-   `tirage-collecteur --installer` to register the Windows service. Trial run:
-   [docs/guides/essai-collecteur.md](docs/guides/essai-collecteur.md).
-4. **People** — inform them before collecting: [docs/guides/information-des-personnes.md](docs/guides/information-des-personnes.md).
+```powershell
+# 2. Collector — on the Windows print server, administrator PowerShell; paste the token when asked
+powershell -ExecutionPolicy Bypass -File .\installer-collecteur.ps1 -Serveur https://tirage.example.org
+```
+
+3. **Interface** — add the `[annuaire]` section (LDAP / Active Directory) to `/etc/tirage/serveur.toml` and restart.
+
+Step-by-step guide, HTTPS, copiers, updates and removal: **[docs/guides/installation.md](docs/guides/installation.md)**
+(in French). Inform the people concerned before collecting:
+[docs/guides/information-des-personnes.md](docs/guides/information-des-personnes.md).
+
+Build from source: `cargo build --release --workspace` (toolchain pinned in `rust-toolchain.toml`).
 
 ## Repository layout
 
