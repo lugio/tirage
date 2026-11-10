@@ -332,7 +332,7 @@ mod tests {
 
     #[test]
     fn version_lisible() {
-        assert!(texte_version().starts_with("tirage-collecteur 0.1.0"));
+        assert!(texte_version().starts_with(concat!("tirage-collecteur ", env!("CARGO_PKG_VERSION"))));
     }
 
     #[test]
