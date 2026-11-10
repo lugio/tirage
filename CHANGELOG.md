@@ -4,9 +4,14 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), ver
 
 ## [Non publié]
 
+## [0.2.1] - 2026-11-10
+
 ### Ajouté
 - Licence commerciale possible sur demande, en plus de l'`AGPL-3.0-only` ; accord de contribution annoncé dans `CONTRIBUTING.md`.
 - Interface : pied de page avec la version et le lien vers le code source (article 13 de l'AGPL).
+
+### Modifié
+- Dépendances mises à jour (Dependabot, PR #1).
 
 ## [0.2.0] - 2026-11-10
 Première version avec archives prêtes à l'emploi.
@@ -59,6 +64,7 @@ Première version publiée.
 - Connexion : l'appartenance au groupe se lit depuis le groupe (`member`, groupes imbriqués compris). Un compte de lecture sans droit sur `memberOf` faisait refuser tout le monde, sans erreur.
 - La taille d'un travail ne retombe plus à 0 quand le spouleur le retire de la file.
 
-[Non publié]: https://github.com/lugio/tirage/compare/v0.2.0...HEAD
+[Non publié]: https://github.com/lugio/tirage/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/lugio/tirage/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/lugio/tirage/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/lugio/tirage/releases/tag/v0.1.0
