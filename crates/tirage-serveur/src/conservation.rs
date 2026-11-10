@@ -117,7 +117,7 @@ mod tests {
             annule.statut = Statut::Annule;
             annule.envoye_ms = MAINTENANT - 400 * JOUR;
             b.enregistrer(&Evenement::Travail(annule), 0).unwrap();
-            b.personne_trouvee("parti.exemple", Some("Parti"), Some("Audit"), Some("Est"), 0)
+            b.personne_trouvee("parti.exemple", Some("Parti"), Some("Atelier"), Some("Est"), 0)
                 .unwrap();
             b.personne_trouvee("reste.exemple", Some("Reste"), None, None, 0)
                 .unwrap();
@@ -146,7 +146,7 @@ mod tests {
         let mois = mois_de(MAINTENANT - 400 * JOUR, &paris());
         let a = b.totaux_archives(Axe::Service, &mois, &mois).unwrap();
         let pages = |n: &str| -> i64 { a.iter().filter(|l| l.cle == n).map(|l| l.pages).sum() };
-        assert_eq!((pages("Audit"), pages("Non rattaché")), (12, 6));
+        assert_eq!((pages("Atelier"), pages("Non rattaché")), (12, 6));
         assert!(
             b.totaux_archives(Axe::Utilisateur, &mois, &mois)
                 .unwrap()
@@ -191,7 +191,7 @@ mod tests {
             for n in 0..200 {
                 b.enregistrer(&ancien(n, "personne-fictive", 400), 0).unwrap();
             }
-            b.personne_trouvee("personne-fictive", Some("Nom-Fictif"), Some("Audit"), None, 0)
+            b.personne_trouvee("personne-fictive", Some("Nom-Fictif"), Some("Atelier"), None, 0)
                 .unwrap();
         }
         appliquer(&base, &conf(), &paris(), MAINTENANT).unwrap();

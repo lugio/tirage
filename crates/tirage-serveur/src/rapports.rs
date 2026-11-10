@@ -18,7 +18,7 @@ use crate::config::ConfigCouts;
 pub enum Axe {
     Utilisateur,
     Service,
-    Cabinet,
+    Site,
     Copieur,
     Format,
     Application,
@@ -28,7 +28,7 @@ impl Axe {
     pub const TOUS: [Axe; 6] = [
         Axe::Utilisateur,
         Axe::Service,
-        Axe::Cabinet,
+        Axe::Site,
         Axe::Copieur,
         Axe::Format,
         Axe::Application,
@@ -42,7 +42,7 @@ impl Axe {
         match self {
             Axe::Utilisateur => "utilisateur",
             Axe::Service => "service",
-            Axe::Cabinet => "cabinet",
+            Axe::Site => "site",
             Axe::Copieur => "copieur",
             Axe::Format => "format",
             Axe::Application => "application",
@@ -53,7 +53,7 @@ impl Axe {
         match self {
             Axe::Utilisateur => "Utilisateur",
             Axe::Service => "Service",
-            Axe::Cabinet => "Cabinet",
+            Axe::Site => "Site",
             Axe::Copieur => "Copieur",
             Axe::Format => "Format",
             Axe::Application => "Application",

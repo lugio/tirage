@@ -58,7 +58,7 @@ const MIGRATIONS: &[&str] = &[
         utilisateur TEXT PRIMARY KEY COLLATE NOCASE,
         nom         TEXT,
         service     TEXT,
-        cabinet     TEXT,
+        site     TEXT,
         trouve      INTEGER NOT NULL,
         verifie_ms  INTEGER NOT NULL
      );
@@ -78,7 +78,7 @@ const MIGRATIONS: &[&str] = &[
     "CREATE TABLE totaux_mensuels (
         mois        TEXT NOT NULL,
         service     TEXT NOT NULL,
-        cabinet     TEXT NOT NULL,
+        site     TEXT NOT NULL,
         file        TEXT NOT NULL,
         couleur     TEXT NOT NULL,
         recto_verso TEXT NOT NULL,
@@ -86,7 +86,7 @@ const MIGRATIONS: &[&str] = &[
         travaux     INTEGER NOT NULL,
         pages       INTEGER NOT NULL,
         feuilles    INTEGER NOT NULL,
-        PRIMARY KEY (mois, service, cabinet, file, couleur, recto_verso, format)
+        PRIMARY KEY (mois, service, site, file, couleur, recto_verso, format)
      );",
     // 4 — prix saisis dans l'interface ; la ligne de file vide porte le tarif général et prime sur la configuration
     "CREATE TABLE tarifs (
@@ -94,7 +94,27 @@ const MIGRATIONS: &[&str] = &[
         noir    REAL,
         couleur REAL
      );",
+    // 5 — l'axe d'organisation s'appelle `site` : renommage de la colonne des bases créées avant (fait par `nommer_axe_site`)
+    "",
 ];
+
+/// Colonne de l'axe d'organisation, par table et par position (`cid`) : les bases créées avant la version 5 la portent
+/// sous un autre nom, renommé ici sans le citer.
+const AXE_SITE: &[(&str, i64)] = &[("personnes", 3), ("totaux_mensuels", 2)];
+
+fn nommer_axe_site(tx: &rusqlite::Transaction<'_>) -> rusqlite::Result<()> {
+    for (table, cid) in AXE_SITE {
+        let nom: String = tx.query_row(
+            &format!("SELECT name FROM pragma_table_info('{table}') WHERE cid = ?1"),
+            [cid],
+            |r| r.get(0),
+        )?;
+        if nom != "site" {
+            tx.execute_batch(&format!("ALTER TABLE {table} RENAME COLUMN \"{nom}\" TO site"))?;
+        }
+    }
+    Ok(())
+}
 
 /// Ce qu'une purge a effacé.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -109,7 +129,7 @@ pub struct BilanPurge {
 pub struct Personne {
     pub nom: Option<String>,
     pub service: Option<String>,
-    pub cabinet: Option<String>,
+    pub site: Option<String>,
     /// Encore présent dans l'annuaire au dernier passage ; sinon, dernières valeurs connues.
     pub trouve: bool,
 }
@@ -157,12 +177,12 @@ pub struct LigneTravail {
     pub orientation: Option<String>,
 }
 
-/// Restreint une lecture à un service, un cabinet, un copieur ou une personne.
+/// Restreint une lecture à un service, un site, un copieur ou une personne.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Filtre<'a> {
     Tout,
     Service(&'a str),
-    Cabinet(&'a str),
+    Site(&'a str),
     Copieur(&'a str),
     Utilisateur(&'a str),
 }
@@ -176,8 +196,8 @@ impl<'a> Filtre<'a> {
                 "COALESCE(NULLIF(p.service, ''), 'Non rattaché') = ?3 COLLATE NOCASE",
                 Some(v),
             ),
-            Filtre::Cabinet(v) => (
-                "COALESCE(NULLIF(p.cabinet, ''), 'Non rattaché') = ?3 COLLATE NOCASE",
+            Filtre::Site(v) => (
+                "COALESCE(NULLIF(p.site, ''), 'Non rattaché') = ?3 COLLATE NOCASE",
                 Some(v),
             ),
             Filtre::Copieur(v) => ("t.file = ?3 COLLATE NOCASE", Some(v)),
@@ -269,6 +289,9 @@ impl Base {
         for (i, sql) in MIGRATIONS.iter().enumerate().skip(actuelle) {
             let tx = self.conn.transaction()?;
             tx.execute_batch(sql)?;
+            if i + 1 == 5 {
+                nommer_axe_site(&tx)?;
+            }
             tx.pragma_update(None, "user_version", (i + 1) as i64)?;
             tx.commit()?;
         }
@@ -351,7 +374,7 @@ impl Base {
         let cle = match axe {
             Axe::Utilisateur => "t.utilisateur",
             Axe::Service => "COALESCE(NULLIF(p.service, ''), 'Non rattaché')",
-            Axe::Cabinet => "COALESCE(NULLIF(p.cabinet, ''), 'Non rattaché')",
+            Axe::Site => "COALESCE(NULLIF(p.site, ''), 'Non rattaché')",
             Axe::Copieur => "t.file",
             Axe::Format => "COALESCE(NULLIF(t.format, ''), 'Inconnu')",
             Axe::Application => "COALESCE(NULLIF(t.application, ''), 'Inconnue')",
@@ -525,7 +548,7 @@ impl Base {
             // Ni personne ni application dans les totaux archivés.
             Axe::Utilisateur | Axe::Application => return Ok(Vec::new()),
             Axe::Service => "service",
-            Axe::Cabinet => "cabinet",
+            Axe::Site => "site",
             Axe::Copieur => "file",
             Axe::Format => "format",
         };
@@ -561,16 +584,16 @@ impl Base {
         {
             let mut lire = tx.prepare(
                 "SELECT t.envoye_ms, COALESCE(NULLIF(p.service, ''), 'Non rattaché'),
-                    COALESCE(NULLIF(p.cabinet, ''), 'Non rattaché'), t.file, t.couleur, t.recto_verso,
+                    COALESCE(NULLIF(p.site, ''), 'Non rattaché'), t.file, t.couleur, t.recto_verso,
                     COALESCE(NULLIF(t.format, ''), 'Inconnu'), t.pages_totales, t.feuilles
                  FROM travaux t LEFT JOIN personnes p ON t.utilisateur = p.utilisateur COLLATE NOCASE
                  WHERE t.envoye_ms < ?1 AND t.statut = 'imprime'",
             )?;
             let mut ajouter = tx.prepare(
-                "INSERT INTO totaux_mensuels (mois, service, cabinet, file, couleur, recto_verso, format, travaux,
+                "INSERT INTO totaux_mensuels (mois, service, site, file, couleur, recto_verso, format, travaux,
                     pages, feuilles)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?9)
-                 ON CONFLICT (mois, service, cabinet, file, couleur, recto_verso, format) DO UPDATE SET
+                 ON CONFLICT (mois, service, site, file, couleur, recto_verso, format) DO UPDATE SET
                     travaux = travaux + 1, pages = pages + excluded.pages, feuilles = feuilles + excluded.feuilles",
             )?;
             let mut lignes = lire.query([limite_ms])?;
@@ -743,15 +766,15 @@ impl Base {
         utilisateur: &str,
         nom: Option<&str>,
         service: Option<&str>,
-        cabinet: Option<&str>,
+        site: Option<&str>,
         ms: i64,
     ) -> rusqlite::Result<()> {
         self.conn.execute(
-            "INSERT INTO personnes (utilisateur, nom, service, cabinet, trouve, verifie_ms)
+            "INSERT INTO personnes (utilisateur, nom, service, site, trouve, verifie_ms)
              VALUES (?1, ?2, ?3, ?4, 1, ?5)
              ON CONFLICT (utilisateur) DO UPDATE SET nom = excluded.nom, service = excluded.service,
-                cabinet = excluded.cabinet, trouve = 1, verifie_ms = excluded.verifie_ms",
-            params![utilisateur, nom, service, cabinet, ms],
+                site = excluded.site, trouve = 1, verifie_ms = excluded.verifie_ms",
+            params![utilisateur, nom, service, site, ms],
         )?;
         Ok(())
     }
@@ -769,13 +792,13 @@ impl Base {
     pub fn personne(&self, utilisateur: &str) -> rusqlite::Result<Option<Personne>> {
         self.conn
             .query_row(
-                "SELECT nom, service, cabinet, trouve FROM personnes WHERE utilisateur = ?1",
+                "SELECT nom, service, site, trouve FROM personnes WHERE utilisateur = ?1",
                 [utilisateur],
                 |r| {
                     Ok(Personne {
                         nom: r.get(0)?,
                         service: r.get(1)?,
-                        cabinet: r.get(2)?,
+                        site: r.get(2)?,
                         trouve: r.get(3)?,
                     })
                 },
@@ -975,13 +998,55 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn migration_5_renomme_l_axe_d_organisation_et_garde_les_donnees() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("t.sqlite");
+        {
+            // Base en version 4 dont la colonne de l'axe porte un autre nom.
+            let c = Connection::open(&p).unwrap();
+            for sql in &MIGRATIONS[..4] {
+                c.execute_batch(
+                    &sql.replace(" site ", " ancien_nom ")
+                        .replace("service, site,", "service, ancien_nom,"),
+                )
+                .unwrap();
+            }
+            c.pragma_update(None, "user_version", 4).unwrap();
+            c.execute(
+                "INSERT INTO personnes (utilisateur, nom, service, ancien_nom, trouve, verifie_ms)
+                 VALUES ('a.exemple', 'A', 'Atelier', 'Est', 1, 0)",
+                [],
+            )
+            .unwrap();
+            c.execute(
+                "INSERT INTO totaux_mensuels VALUES ('2026-01', 'Atelier', 'Est', 'F', 'couleur', 'recto', 'A4', 1, 2, 2)",
+                [],
+            )
+            .unwrap();
+        }
+        let b = Base::ouvrir(&p).unwrap();
+        assert_eq!(b.version().unwrap(), MIGRATIONS.len());
+        assert_eq!(
+            b.personne("a.exemple").unwrap().unwrap().site.as_deref(),
+            Some("Est")
+        );
+        let site: String = b
+            .conn
+            .query_row("SELECT site FROM totaux_mensuels", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(site, "Est");
+        // Une base neuve a déjà la bonne colonne : la migration ne fait rien.
+        assert_eq!(Base::en_memoire().unwrap().version().unwrap(), MIGRATIONS.len());
+    }
+
+    #[test]
     fn fiche_absente_garde_les_dernieres_valeurs() {
         let b = Base::en_memoire().unwrap();
-        b.personne_trouvee("a.exemple", Some("A Exemple"), Some("Audit"), None, 10)
+        b.personne_trouvee("a.exemple", Some("A Exemple"), Some("Atelier"), None, 10)
             .unwrap();
         b.personne_absente("A.EXEMPLE", 20).unwrap();
         let p = b.personne("a.exemple").unwrap().unwrap();
-        assert_eq!(p.service.as_deref(), Some("Audit"));
+        assert_eq!(p.service.as_deref(), Some("Atelier"));
         assert!(!p.trouve);
         b.personne_absente("b.exemple", 20).unwrap();
         assert_eq!(b.personne("b.exemple").unwrap().unwrap().nom, None);
@@ -1047,9 +1112,9 @@ pub(crate) mod tests {
         ajouter(1, "a.exemple", "COPIEUR-1");
         ajouter(2, "b.exemple", "COPIEUR-1");
         ajouter(3, "c.exemple", "COPIEUR-2");
-        b.personne_trouvee("a.exemple", None, Some("Audit"), Some("Est"), 0)
+        b.personne_trouvee("a.exemple", None, Some("Atelier"), Some("Est"), 0)
             .unwrap();
-        b.personne_trouvee("b.exemple", None, Some("Paie"), Some("Est"), 0)
+        b.personne_trouvee("b.exemple", None, Some("Commercial"), Some("Est"), 0)
             .unwrap();
         let cles = |f| -> Vec<String> {
             let mut v: Vec<String> = b
@@ -1062,9 +1127,9 @@ pub(crate) mod tests {
             v
         };
         assert_eq!(cles(Filtre::Tout).len(), 3);
-        assert_eq!(cles(Filtre::Service("AUDIT")), ["a.exemple"]);
+        assert_eq!(cles(Filtre::Service("ATELIER")), ["a.exemple"]);
         assert_eq!(cles(Filtre::Service("Non rattaché")), ["c.exemple"]);
-        assert_eq!(cles(Filtre::Cabinet("Est")), ["a.exemple", "b.exemple"]);
+        assert_eq!(cles(Filtre::Site("Est")), ["a.exemple", "b.exemple"]);
         assert_eq!(cles(Filtre::Copieur("copieur-2")), ["c.exemple"]);
         assert_eq!(cles(Filtre::Utilisateur("B.EXEMPLE")), ["b.exemple"]);
         assert!(
@@ -1236,13 +1301,13 @@ pub(crate) mod tests {
         inconnu.utilisateur = "b.exemple".into();
         inconnu.format = None;
         b.enregistrer(&Evenement::Travail(inconnu), 0).unwrap();
-        b.personne_trouvee("a.exemple", Some("A Exemple"), Some("Audit"), None, 0)
+        b.personne_trouvee("a.exemple", Some("A Exemple"), Some("Atelier"), None, 0)
             .unwrap();
 
         let (du, au) = (0, i64::MAX);
         let s = b.agreger(Axe::Service, du, au).unwrap();
         let pages = |nom: &str| -> i64 { s.iter().filter(|l| l.cle == nom).map(|l| l.pages).sum() };
-        assert_eq!((pages("Audit"), pages("Non rattaché")), (12, 6), "annulé exclu");
+        assert_eq!((pages("Atelier"), pages("Non rattaché")), (12, 6), "annulé exclu");
         let f = b.agreger(Axe::Format, du, au).unwrap();
         assert!(f.iter().any(|l| l.cle == "Inconnu"));
         let u = b.agreger(Axe::Utilisateur, du, au).unwrap();

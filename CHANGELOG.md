@@ -4,6 +4,10 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), ver
 
 ## [Non publié]
 
+### Modifié
+- L'axe d'organisation lu dans l'annuaire (par défaut `company`) s'appelle désormais **site** : option `attribut_site` de `[annuaire]`, pages `/sites/…`, axe « Site » des rapports et du CSV. La base passe en version 5 au démarrage (colonne renommée, données gardées). **Mise à jour** : renommer l'option de l'axe en `attribut_site` dans la configuration du serveur, sinon il refuse de démarrer.
+- Jeux d'essai et captures : services fictifs génériques (Atelier, Commercial, Logistique, Direction).
+
 ## [0.3.0] - 2026-11-10
 Profils de copieurs ouverts aux contributions.
 
@@ -43,7 +47,7 @@ Première version publiée.
 - Collecteur : relevé automatique des copieurs déclarés (`[snmp] intervalle_minutes`, 60 par défaut), envoyé par la file ; profil Konica Minolta avec compteurs noir et couleur, copie et impression, y compris sur un appareil sans fonction copie.
 - Interface : page Tarifs, prix par page N&B et couleur, général ou par copieur, gardés en base, inscrits au journal ; ils priment sur `[couts]`.
 - Interface : état de la collecte (dernier travail reçu par collecteur, avertissement s'il est muet en heures ouvrées) ; activité par jour et par heure, globale ou par copieur, jamais par personne ; rapport par application ; gros travaux par copieur. Seuls les travaux en couleur sont signalés comme gros. Réglages `gros_travail_couleur_pages`, `collecte_silence_minutes`, `heure_ouverture`, `heure_fermeture`.
-- Interface : page Copieurs alimentée par les travaux (activité, personnes, non imprimés, dernier travail), sans attendre le relevé SNMP ; raccourcis de période ; comparaison à la période précédente et feuilles évitées par le recto-verso ; vue d'un service, d'un cabinet ou d'un copieur, journalisée ; fiche d'une personne avec ses totaux, son évolution, ses copieurs, et durée, taille, résolution et orientation de chaque travail.
+- Interface : page Copieurs alimentée par les travaux (activité, personnes, non imprimés, dernier travail), sans attendre le relevé SNMP ; raccourcis de période ; comparaison à la période précédente et feuilles évitées par le recto-verso ; vue d'un service, d'un site ou d'un copieur, journalisée ; fiche d'une personne avec ses totaux, son évolution, ses copieurs, et durée, taille, résolution et orientation de chaque travail.
 - Squelette de l'espace Cargo (modèle, file d'attente, collecteur, serveur), CI, politique de dépendances, ADR 0001-0002.
 - Format d'échange v1 (`tirage-modele`) : travail d'impression, relevé de copieur, enveloppe versionnée, politique du nom de document (non / application / complet) et déduction de l'application d'origine.
 - Collecteur, lecture du spouleur Windows (`tirage-collecteur --console`) : abonnement aux notifications de travaux du serveur d'impression local, réglages du pilote (DEVMODE : copies, couleur, recto-verso, format, orientation, résolution), suivi jusqu'à la sortie de file, dépôt dans la file d'attente. Guide d'essai : `docs/guides/essai-collecteur.md`.
@@ -53,10 +57,10 @@ Première version publiée.
 - Serveur de réception (`tirage-serveur --config`) : `POST /api/v1/evenements`, jeton par collecteur (seule son empreinte est configurée ; `--nouveau-jeton`), base SQLite versionnée, idempotence (un travail renvoyé n'est jamais compté deux fois), refus par élément sans bloquer le lot.
 - Envoi par le collecteur (`--console --config`) : fil dédié qui vide la file vers le serveur en HTTPS (magasin de certificats du système ou autorité fournie ; `http://` refusé sauf essai), acquittés retirés, refusés mis de côté, délai croissant si le serveur est injoignable. Essai de bout en bout collecteur → serveur.
 - Service Windows du collecteur (`--installer`, `--desinstaller`, `--service`) : LocalSystem, démarrage automatique différé après le spouleur, redémarrage après échec, arrêt propre (le fil d'envoi termine). Journal de fonctionnement horodaté sans aucune donnée de travail, taille bornée.
-- Annuaire en lecture seule (`[annuaire]`, LDAPS) : service et cabinet des seules personnes qui ont imprimé, par recherche nominative, relus régulièrement ; dernières valeurs gardées pour un compte disparu. ADR 0004, guide `docs/guides/annuaire.md`.
+- Annuaire en lecture seule (`[annuaire]`, LDAPS) : service et site des seules personnes qui ont imprimé, par recherche nominative, relus régulièrement ; dernières valeurs gardées pour un compte disparu. ADR 0004, guide `docs/guides/annuaire.md`.
 - Connexion à l'interface réservée à un groupe (groupes imbriqués compris) : mot de passe vide refusé avant tout échange, refus indiscernables, limite d'essais par identifiant, session en mémoire (cookie `HttpOnly`, `Secure`, `SameSite=Strict`, seule l'empreinte du jeton est gardée).
 - Journal des consultations : connexions, détail par utilisateur et lecture du journal, écrits avant de servir les données (journal indisponible = page non servie) ; lignes non modifiables.
-- Interface : tableau de bord sur une période, rapports par utilisateur, service, cabinet, copieur et format (N&B, couleur, recto-verso, feuilles, coût), palmarès, état des copieurs, détail par utilisateur, dates dans le fuseau configuré. Chaque lecture est au journal.
+- Interface : tableau de bord sur une période, rapports par utilisateur, service, site, copieur et format (N&B, couleur, recto-verso, feuilles, coût), palmarès, état des copieurs, détail par utilisateur, dates dans le fuseau configuré. Chaque lecture est au journal.
 - Coûts (`[couts]`) : prix par page N&B et couleur, général ou par file ; une file sans tarif est signalée, un mode couleur inconnu est chiffré au tarif noir.
 - Export CSV pour tableur (UTF-8 avec BOM, point-virgule, valeurs prises pour une formule neutralisées), sans nom de document.
 - Conservation (`[conservation]`, 12 mois par défaut) : le détail passe en totaux mensuels sans nom, effacement réel dans le fichier, fiches sans objet retirées, journal des consultations purgé ; les rapports continuent de compter ces totaux pour les mois entiers.

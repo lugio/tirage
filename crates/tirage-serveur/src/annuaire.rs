@@ -1,4 +1,4 @@
-//! Annuaire, en lecture seule : connexion réservée à un groupe, service et cabinet des personnes.
+//! Annuaire, en lecture seule : connexion réservée à un groupe, service et site des personnes.
 //!
 //! - Seules les personnes **qui ont imprimé** sont lues, par recherche nominative : l'annuaire n'est jamais recopié.
 //! - Un mot de passe vide est refusé avant tout échange : en LDAP, il donnerait une liaison anonyme « réussie ».
@@ -37,7 +37,7 @@ pub struct Fiche {
     pub identifiant: String,
     pub nom: Option<String>,
     pub service: Option<String>,
-    pub cabinet: Option<String>,
+    pub site: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,7 +60,7 @@ pub fn identifiant_nu(utilisateur: &str) -> &str {
     u.split('@').next().unwrap_or(u).trim()
 }
 
-/// Première unité d'organisation d'un DN (`CN=x,OU=Audit,OU=Lyon,DC=…` → `Audit`).
+/// Première unité d'organisation d'un DN (`CN=x,OU=Atelier,OU=Lyon,DC=…` → `Atelier`).
 fn premiere_ou(dn: &str) -> Option<String> {
     let mut reste = dn;
     while let Some((debut, suite)) = coupe_rdn(reste) {
@@ -139,7 +139,7 @@ impl Ldap {
             self.cfg.attribut_identifiant.as_str(),
             self.cfg.attribut_nom.as_str(),
         ];
-        for x in [&self.cfg.attribut_service, &self.cfg.attribut_cabinet] {
+        for x in [&self.cfg.attribut_service, &self.cfg.attribut_site] {
             if x != "dn:ou" {
                 a.push(x);
             }
@@ -165,7 +165,7 @@ impl Ldap {
             identifiant: self.valeur(e, &self.cfg.attribut_identifiant)?,
             nom: self.valeur(e, &self.cfg.attribut_nom),
             service: self.valeur(e, &self.cfg.attribut_service),
-            cabinet: self.valeur(e, &self.cfg.attribut_cabinet),
+            site: self.valeur(e, &self.cfg.attribut_site),
         })
     }
 
@@ -323,7 +323,7 @@ pub fn synchroniser(
                     u,
                     f.nom.as_deref(),
                     f.service.as_deref(),
-                    f.cabinet.as_deref(),
+                    f.site.as_deref(),
                     maintenant_ms,
                 ),
                 None => {
@@ -364,12 +364,12 @@ mod tests {
     #[test]
     fn unite_du_dn() {
         assert_eq!(
-            premiere_ou("CN=A,OU=Audit,OU=Lyon,DC=example,DC=org").as_deref(),
-            Some("Audit")
+            premiere_ou("CN=A,OU=Atelier,OU=Lyon,DC=example,DC=org").as_deref(),
+            Some("Atelier")
         );
         assert_eq!(
-            premiere_ou(r"CN=Exemple\, A,OU=Paie\, Social,DC=x").as_deref(),
-            Some("Paie, Social")
+            premiere_ou(r"CN=Exemple\, A,OU=Achats\, Ventes,DC=x").as_deref(),
+            Some("Achats, Ventes")
         );
         assert_eq!(premiere_ou("CN=A,DC=example,DC=org"), None);
     }
@@ -396,8 +396,8 @@ mod tests {
         let fiche = Fiche {
             identifiant: "a.exemple".into(),
             nom: Some("A Exemple".into()),
-            service: Some("Audit".into()),
-            cabinet: Some("Exemple-Est".into()),
+            service: Some("Atelier".into()),
+            site: Some("Exemple-Est".into()),
         };
         let bilan = synchroniser(&base, &Faux(Ok(vec![fiche])), 1000, 100).unwrap();
         assert_eq!(
@@ -409,7 +409,7 @@ mod tests {
         );
         let b = base.lock().unwrap();
         let p = b.personne(r"exemple\a.exemple").unwrap().unwrap();
-        assert_eq!(p.service.as_deref(), Some("Audit"));
+        assert_eq!(p.service.as_deref(), Some("Atelier"));
         assert!(!b.personne("b.exemple").unwrap().unwrap().trouve);
         drop(b);
         // Fiches récentes : pas de nouvelle lecture.

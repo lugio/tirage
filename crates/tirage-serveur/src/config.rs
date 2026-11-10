@@ -129,8 +129,8 @@ pub struct ConfigAnnuaire {
     #[serde(default = "defaut_service")]
     pub attribut_service: String,
     /// Attribut LDAP, ou `dn:ou`.
-    #[serde(default = "defaut_cabinet")]
-    pub attribut_cabinet: String,
+    #[serde(default = "defaut_site")]
+    pub attribut_site: String,
     /// Âge maximal d'une fiche avant de la relire dans l'annuaire.
     #[serde(default = "defaut_rafraichissement")]
     pub rafraichissement_minutes: u32,
@@ -148,7 +148,7 @@ fn defaut_nom() -> String {
 fn defaut_service() -> String {
     "department".into()
 }
-fn defaut_cabinet() -> String {
+fn defaut_site() -> String {
     "company".into()
 }
 fn defaut_rafraichissement() -> u32 {
@@ -220,7 +220,7 @@ impl ConfigAnnuaire {
             ("attribut_identifiant", &self.attribut_identifiant, false),
             ("attribut_nom", &self.attribut_nom, false),
             ("attribut_service", &self.attribut_service, true),
-            ("attribut_cabinet", &self.attribut_cabinet, true),
+            ("attribut_site", &self.attribut_site, true),
         ];
         for (nom, v, dn_permis) in attributs {
             if !attribut_valide(v, dn_permis) {

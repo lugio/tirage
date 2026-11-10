@@ -19,9 +19,9 @@ minimisation, durée de conservation limitée, accès restreint, information pr�
 
 ## Mise en œuvre de la conservation (04/11/2026)
 - Passage quotidien, au démarrage puis toutes les 24 h, en une transaction : le détail d'avant la limite devient des
-  totaux par mois, service, cabinet, file, couleur, recto-verso et format ; il est effacé, ainsi que les fiches de
+  totaux par mois, service, site, file, couleur, recto-verso et format ; il est effacé, ainsi que les fiches de
   l'annuaire devenues sans objet. Effacement réel dans le fichier (`secure_delete`, vidage du journal d'écriture).
-- Le service et le cabinet des totaux sont ceux connus au moment de la purge.
+- Le service et le site des totaux sont ceux connus au moment de la purge.
 - **Limite** : un total « sans nom » reste rattachable à une personne si elle est seule dans son service ou sur son
   copieur. C'est un pseudonymat de fait, à garder en tête avant d'élargir les lecteurs.
 - Journal des consultations : 12 mois par défaut (la CNIL recommande de 6 mois à 1 an pour une journalisation).
