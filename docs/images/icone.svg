@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-labelledby="titre">
+  <title id="titre">tirage</title>
+  <rect width="256" height="256" rx="56" fill="#0f5e58"/>
+  <!-- Feuille au coin replié -->
+  <path d="M70 44h86l38 38v130a10 10 0 0 1-10 10H70a10 10 0 0 1-10-10V54a10 10 0 0 1 10-10z" fill="#ffffff"/>
+  <path d="M156 44v28a10 10 0 0 0 10 10h28z" fill="#cfe3e1"/>
+  <!-- Pages comptées : quatre barres aux couleurs des toners -->
+  <rect x="80" y="150" width="20" height="52" rx="4" fill="#23282c"/>
+  <rect x="108" y="126" width="20" height="76" rx="4" fill="#00a0dc"/>
+  <rect x="136" y="138" width="20" height="64" rx="4" fill="#d6007f"/>
+  <rect x="164" y="112" width="20" height="90" rx="4" fill="#f0c400"/>
+  <!-- Lignes de texte -->
+  <rect x="80" y="72" width="60" height="8" rx="4" fill="#0f5e58" opacity=".55"/>
+  <rect x="80" y="90" width="92" height="8" rx="4" fill="#0f5e58" opacity=".3"/>
+</svg>

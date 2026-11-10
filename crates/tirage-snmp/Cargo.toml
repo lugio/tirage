@@ -4,7 +4,7 @@ description = "Client SNMP v2c minimal (lecture seule : GET, GETNEXT), sans dép
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license-file.workspace = true
+license.workspace = true
 publish.workspace = true
 
 [lints]

@@ -1,0 +1,23 @@
+name: Feature request / Demande d'évolution
+description: Suggest an improvement. / Proposer une amélioration.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: besoin
+    attributes:
+      label: Need / Besoin
+      description: What are you trying to do, and what stops you today? / Que cherchez-vous à faire, qu'est-ce qui bloque ?
+    validations: { required: true }
+  - type: textarea
+    id: proposition
+    attributes:
+      label: Proposal / Proposition
+  - type: textarea
+    id: vie-privee
+    attributes:
+      label: Privacy impact / Effet sur les données personnelles
+      description: Does it show more about individuals? / Cela montre-t-il davantage sur une personne ?
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered / Autres pistes

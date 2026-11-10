@@ -1,7 +1,14 @@
 # Journal des versions
 
+Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/), versions selon [SemVer](https://semver.org/lang/fr/).
+
 ## [Non publié]
+
+## [0.1.0] - 2026-11-10
+Première version publiée.
+
 ### Modifié
+- Licence AGPL-3.0-only ; README en anglais et en français avec captures sur données fictives et icône ; code de conduite, modèles de ticket et de PR, CODEOWNERS, Dependabot.
 - Consommables : chaque jauge a la couleur de son toner, le pourcentage d'un toner bas ressort, titres de colonnes alignés sur les jauges.
 - Interface, à la suite d'un audit : rubrique Rapports dans la navigation, classements cliquables sur la période choisie, journal en français, niveaux et toners bas repérables d'un coup d'œil, intitulés et noms longs qui passent à la ligne, barres de classement dans une teinte distincte des séries N&B et couleur, raccourcis de période sur le palmarès, retour au tableau de bord sur une page d'erreur, lien d'évitement et focus visibles au clavier.
 
@@ -38,3 +45,6 @@
 - Sécurité : SQLite embarqué mis à jour (rusqlite 0.41, libsqlite3-sys 0.39), qui corrige RUSTSEC-2026-0459 (lecture de mémoire non initialisée avec un fichier `-wal` fabriqué ; attaque locale).
 - Connexion : l'appartenance au groupe se lit depuis le groupe (`member`, groupes imbriqués compris). Un compte de lecture sans droit sur `memberOf` faisait refuser tout le monde, sans erreur.
 - La taille d'un travail ne retombe plus à 0 quand le spouleur le retire de la file.
+
+[Non publié]: https://github.com/lugio/tirage/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/lugio/tirage/releases/tag/v0.1.0
