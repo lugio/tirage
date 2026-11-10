@@ -33,6 +33,13 @@ Windows.
 - **Dependencies** — permissive licences only (see `deny.toml`).
 - **User-visible change** — add a line to `CHANGELOG.md` under « Non publié ».
 
+## Licensing of contributions
+
+tirage is licensed under `AGPL-3.0-only` and is also offered under a commercial licence. To keep that possible, the
+first external pull request will be asked to sign a short **Contributor Licence Agreement** (you keep the copyright of
+your work and grant the maintainer the right to distribute it under both licences). Small fixes such as typos can be
+rewritten by the maintainer instead, if you prefer.
+
 ## Releasing (maintainers)
 
 1. In one pull request: bump `version` in `Cargo.toml` (SemVer), rename « Non publié » in `CHANGELOG.md` to
@@ -47,3 +54,5 @@ Windows.
 Une branche et une PR par changement, CI verte avant fusion, messages `type(portée): résumé`. **Aucune donnée réelle** :
 exemples, jeux d'essai et captures fictifs. Rien de propre à un site dans le code ni les valeurs par défaut.
 Dépendances aux licences permissives. Toute évolution visible va dans le `CHANGELOG.md`. Version : PR qui monte `Cargo.toml` et date le `CHANGELOG.md`, puis tag `vX.Y.Z` : la CI publie les archives.
+Licence `AGPL-3.0-only`, et licence commerciale possible : la première contribution extérieure signera un court accord
+de contribution (vous gardez vos droits d'auteur et autorisez la diffusion sous les deux licences).

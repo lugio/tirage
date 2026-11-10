@@ -79,6 +79,10 @@ fn navigation(rubrique: Rubrique, qui: &str) -> String {
     h
 }
 
+/// Adresse du code source, affichée au pied de chaque page (AGPL-3.0, article 13) : une version modifiée et
+/// servie à d'autres doit pointer vers SON propre code source.
+pub const SOURCE: &str = "https://github.com/lugio/tirage";
+
 /// Page complète. Sans session, l'en-tête ne porte que le nom de l'outil.
 pub fn page(rubrique: Rubrique, titre: &str, corps: &str, session: Option<&Session>) -> String {
     let nav = session.map_or(String::new(), |s| {
@@ -89,8 +93,10 @@ pub fn page(rubrique: Rubrique, titre: &str, corps: &str, session: Option<&Sessi
          <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
          <link rel=\"stylesheet\" href=\"/style.css\"><link rel=\"icon\" href=\"/logo.svg\" type=\"image/svg+xml\"></head><body>\
          <a class=\"evitement\" href=\"#contenu\">Aller au contenu</a><header><span class=\"marque\"><img src=\"/logo.svg\" alt=\"\" width=\"28\" height=\"28\">Tirage</span>{nav}</header>\
-         <main id=\"contenu\"><h1>{t}</h1>{corps}</main></body></html>",
-        t = echapper(titre)
+         <main id=\"contenu\"><h1>{t}</h1>{corps}</main>\
+         <footer class=\"pied\">Tirage {v} · <a href=\"{SOURCE}\">Code source</a> · licence AGPL-3.0</footer></body></html>",
+        t = echapper(titre),
+        v = env!("CARGO_PKG_VERSION")
     )
 }
 
@@ -325,6 +331,16 @@ impl Tableau {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chaque_page_donne_le_lien_du_code_source() {
+        let h = page(Rubrique::Accueil, "Connexion", "", None);
+        assert!(
+            h.contains(&format!("<a href=\"{SOURCE}\">Code source</a>")),
+            "{h}"
+        );
+        assert!(h.contains(env!("CARGO_PKG_VERSION")), "{h}");
+    }
 
     #[test]
     fn le_tableau_echappe_et_aligne() {
