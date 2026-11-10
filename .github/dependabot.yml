@@ -10,4 +10,7 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
+    ignore:
+      # La « version » de cette action est la chaîne Rust épinglée (rust-toolchain.toml) : elle change à la main.
+      - dependency-name: dtolnay/rust-toolchain
     commit-message: { prefix: "chore(ci)" }
