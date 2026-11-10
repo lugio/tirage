@@ -8,6 +8,8 @@ use std::fmt::Write as _;
 use crate::session::Session;
 
 pub const FEUILLE_DE_STYLE: &str = include_str!("style.css");
+/// Logo de l'outil, servi sur /logo.svg (en-tête et icône d'onglet). Copie conforme de `docs/images/icone.svg`.
+pub const LOGO: &str = include_str!("logo.svg");
 
 /// Rubrique de la navigation à signaler comme active.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,8 +87,8 @@ pub fn page(rubrique: Rubrique, titre: &str, corps: &str, session: Option<&Sessi
     format!(
         "<!doctype html><html lang=\"fr\"><head><meta charset=\"utf-8\"><title>{t} — Tirage</title>\
          <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
-         <link rel=\"stylesheet\" href=\"/style.css\"></head><body>\
-         <a class=\"evitement\" href=\"#contenu\">Aller au contenu</a><header><span class=\"marque\">Tirage</span>{nav}</header>\
+         <link rel=\"stylesheet\" href=\"/style.css\"><link rel=\"icon\" href=\"/logo.svg\" type=\"image/svg+xml\"></head><body>\
+         <a class=\"evitement\" href=\"#contenu\">Aller au contenu</a><header><span class=\"marque\"><img src=\"/logo.svg\" alt=\"\" width=\"28\" height=\"28\">Tirage</span>{nav}</header>\
          <main id=\"contenu\"><h1>{t}</h1>{corps}</main></body></html>",
         t = echapper(titre)
     )

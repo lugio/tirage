@@ -34,8 +34,8 @@ use crate::rapports::{self, Axe, Ligne, Tranche};
 use crate::session::{Limiteur, Session, Sessions};
 pub use gabarit::echapper;
 use gabarit::{
-    Cellule, Colonne, FEUILLE_DE_STYLE, Rubrique, Tableau, bouton_lien, carte, duree, encoder_chemin, entier,
-    erreur, note, onglets, page, taille, tuiles,
+    Cellule, Colonne, FEUILLE_DE_STYLE, LOGO, Rubrique, Tableau, bouton_lien, carte, duree, encoder_chemin,
+    entier, erreur, note, onglets, page, taille, tuiles,
 };
 use graphique::{Point, Serie, barre, barre_teintee, chaleur, colonnes_empilees, legende, segments};
 
@@ -397,6 +397,7 @@ pub fn routes<S: Clone + Send + Sync + 'static>(c: Contexte) -> Router<S> {
     Router::new()
         .route("/connexion", get(page_connexion).post(connecter))
         .route("/style.css", get(style))
+        .route("/logo.svg", get(logo))
         .merge(protegees)
         .layer(DefaultBodyLimit::max(CORPS_MAX))
         .layer(middleware::map_response(entetes_de_securite))
@@ -408,7 +409,7 @@ async fn entetes_de_securite(mut r: Response) -> Response {
     for (nom, valeur) in [
         (
             header::CONTENT_SECURITY_POLICY,
-            "default-src 'none'; style-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+            "default-src 'none'; style-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
         ),
         (header::CACHE_CONTROL, "no-store"),
         (header::REFERRER_POLICY, "no-referrer"),
@@ -425,6 +426,10 @@ async fn style() -> Response {
         FEUILLE_DE_STYLE,
     )
         .into_response()
+}
+
+async fn logo() -> Response {
+    ([(header::CONTENT_TYPE, "image/svg+xml")], LOGO).into_response()
 }
 
 fn jeton_du_cookie(entetes: &HeaderMap) -> Option<&str> {
@@ -2581,9 +2586,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn logo_servi_sans_session_et_dans_l_en_tete() {
+        let b = banc();
+        let r = b.get("/logo.svg", None).await;
+        assert_eq!(r.code, StatusCode::OK);
+        assert_eq!(r.entetes.get(header::CONTENT_TYPE).unwrap(), "image/svg+xml");
+        assert!(r.texte.starts_with("<svg"), "{}", r.texte);
+        let csp = r
+            .entetes
+            .get(header::CONTENT_SECURITY_POLICY)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(csp.contains("img-src 'self'"), "{csp}");
+        let p = b.get("/connexion", None).await;
+        assert!(p.texte.contains("<img src=\"/logo.svg\" alt=\"\""), "{}", p.texte);
+        assert!(p.texte.contains("rel=\"icon\" href=\"/logo.svg\""), "{}", p.texte);
+    }
+
+    #[test]
+    fn logo_identique_a_l_icone_du_depot() {
+        assert_eq!(LOGO, include_str!("../../../docs/images/icone.svg"));
+    }
+
+    #[tokio::test]
     async fn entetes_de_securite_sur_toutes_les_pages() {
         let b = banc();
-        for chemin in ["/connexion", "/style.css", "/"] {
+        for chemin in ["/connexion", "/style.css", "/logo.svg", "/"] {
             let r = b.get(chemin, None).await;
             assert_eq!(
                 r.entetes.get(header::CACHE_CONTROL).unwrap(),

@@ -2,15 +2,16 @@
 
 :root {
   color-scheme: light dark;
-  --accent: #0f5e58;
-  --accent-fonce: #0c4d48;
-  --lien: #0f5e58;
-  --chiffre: #0f5e58;
+  /* Encre ardoise : couleur de la marque, distincte du bleu N&B et de l'orange couleur des graphiques. */
+  --accent: #263445;
+  --accent-fonce: #1b2633;
+  --lien: #34506e;
+  --chiffre: #34506e;
   --texte: #1f2933;
   --texte-doux: #56636c;
   --fond: #f4f6f7;
   --surface: #fff;
-  --surface-douce: #f7fafa;
+  --surface-douce: #f7f9fb;
   --entete-tableau: #eef2f3;
   --bord: #dde3e6;
   --bord-fin: #e8ecee;
@@ -34,8 +35,11 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --lien: #5fd0c5;
-    --chiffre: #5fd0c5;
+    /* Ardoise un peu plus claire : en-tête et boutons se détachent du fond sombre. */
+    --accent: #34506e;
+    --accent-fonce: #2b425c;
+    --lien: #9db8d6;
+    --chiffre: #9db8d6;
     --texte: #e6eaec;
     --texte-doux: #a3afb7;
     --fond: #12181c;
@@ -92,7 +96,8 @@ header {
   color: #fff;
   background: var(--accent);
 }
-.marque { font-size: 1.1rem; font-weight: 700; }
+.marque { display: flex; align-items: center; gap: .5rem; font-size: 1.1rem; font-weight: 700; }
+.marque img { display: block; width: 1.75rem; height: 1.75rem; }
 nav { display: flex; flex-wrap: wrap; gap: .25rem; }
 nav a { padding: .25rem .6rem; border-radius: 4px; color: #fff; text-decoration: none; transition: background .15s; }
 nav a:hover, nav a[aria-current] { background: #ffffff26; }
