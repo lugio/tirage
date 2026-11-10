@@ -4,6 +4,9 @@ Thank you for your interest! Issues and pull requests are welcome, in English or
 
 ## Before you start
 
+- **Adding a copier brand** is the easiest contribution: a profile and its test sample, two text files — see
+  [docs/guides/printer-profiles.md](docs/guides/printer-profiles.md).
+
 - For anything larger than a small fix, open an issue first so we can agree on the approach.
 - Read the [architecture decisions](docs/architecture/) — especially
   [personal data](docs/architecture/0002-donnees-personnelles.md): this tool describes people at work.
@@ -51,7 +54,8 @@ rewritten by the maintainer instead, if you prefer.
 
 ## Résumé en français
 
-Une branche et une PR par changement, CI verte avant fusion, messages `type(portée): résumé`. **Aucune donnée réelle** :
+Ajouter une marque de copieur = un profil et son relevé d'essai, deux fichiers texte
+([guide](docs/guides/printer-profiles.md)). Une branche et une PR par changement, CI verte avant fusion, messages `type(portée): résumé`. **Aucune donnée réelle** :
 exemples, jeux d'essai et captures fictifs. Rien de propre à un site dans le code ni les valeurs par défaut.
 Dépendances aux licences permissives. Toute évolution visible va dans le `CHANGELOG.md`. Version : PR qui monte `Cargo.toml` et date le `CHANGELOG.md`, puis tag `vX.Y.Z` : la CI publie les archives.
 Licence `AGPL-3.0-only`, et licence commerciale possible : la première contribution extérieure signera un court accord

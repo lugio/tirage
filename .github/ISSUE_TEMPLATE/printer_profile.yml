@@ -1,0 +1,42 @@
+name: Printer profile / Profil de copieur
+description: Ask for (or help with) black and colour counters for a brand. / Demander ou aider à relever le noir et la couleur d'une marque.
+title: "Printer profile: <brand> / Profil de copieur : <marque>"
+labels: [enhancement, printer-profile]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Guide: [docs/guides/printer-profiles.md](https://github.com/lugio/tirage/blob/main/docs/guides/printer-profiles.md).
+        **This issue is public.** Never paste a full SNMP walk: it can contain the serial number, name, location,
+        addresses and sometimes user names. / **Ce ticket est public.** Ne jamais coller un parcours SNMP complet.
+  - type: input
+    id: marque
+    attributes:
+      label: Brand and models / Marque et modèles
+      placeholder: Example Brand C300, C400
+    validations: { required: true }
+  - type: input
+    id: entreprise
+    attributes:
+      label: sysObjectID (or enterprise number) / sysObjectID (ou numéro d'entreprise)
+      placeholder: 1.3.6.1.4.1.32473.1.2.3
+    validations: { required: true }
+  - type: textarea
+    id: compteurs
+    attributes:
+      label: Counters shown by the copier / Compteurs affichés par le copieur
+      description: Total, black, colour (and copy / print if shown), read at the time of the walk. / Relevés au moment du parcours.
+    validations: { required: true }
+  - type: textarea
+    id: lignes
+    attributes:
+      label: Matching numeric lines (optional) / Lignes numériques correspondantes (facultatif)
+      description: Only `OID = Counter32/INTEGER/Gauge32/Counter64` lines that match the counters above. / Seulement les lignes de nombres.
+      render: text
+  - type: checkboxes
+    id: confidentialite
+    attributes:
+      label: Privacy / Confidentialité
+      options:
+        - label: I removed every text value, serial number, name, location and address. / J'ai retiré tout texte, numéro de série, nom, emplacement et adresse.
+          required: true

@@ -30,7 +30,7 @@
   from the driver, duplex, paper size, status, application. Jobs are queued on disk until the server acknowledges them.
 - **Copiers over SNMP** — B&amp;W and colour counters, toner and other consumables, alerts, translated and ranked;
   pages actually produced between two readings, copies included. Printer-MIB (RFC 3805) plus brand profiles as TOML
-  files, added without recompiling.
+  files, added without recompiling — [add your brand](docs/guides/printer-profiles.md).
 - **Dashboards** — by user, department, site, copier, paper size, application; activity by day and hour; period
   comparison; sheets saved by duplex; top lists; CSV export.
 - **Costs** — B&amp;W and colour price per page, global or per copier, entered in the interface.
@@ -96,8 +96,8 @@ Build from source: `cargo build --release --workspace` (toolchain pinned in `rus
 |---|---|
 | `crates/tirage-modele` | Versioned exchange format (jobs, readings) |
 | `crates/tirage-file` | On-disk queue |
-| `crates/tirage-snmp` | SNMP client and brand profiles |
-| `crates/tirage-collecteur` | Windows service: spooler + SNMP |
+| `crates/tirage-snmp` | SNMP client (read-only) |
+| `crates/tirage-collecteur` | Windows service: spooler + SNMP; brand profiles in `profils/` |
 | `crates/tirage-serveur` | Reception, storage, web interface |
 | `docs/architecture` | Architecture decision records |
 | `docs/guides` | Installation and operation guides |
@@ -113,7 +113,8 @@ Build from source: `cargo build --release --workspace` (toolchain pinned in `rus
 
 ## Contributing
 
-Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Please report vulnerabilities
+Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). The easiest way to help: a
+[profile for your copier brand](docs/guides/printer-profiles.md), a text file checked by CI. Please report vulnerabilities
 privately, as described in [SECURITY.md](SECURITY.md).
 
 ## License

@@ -1,0 +1,12 @@
+# Relevé d'essai FICTIF : appareil d'une marque sans profil (numéro d'entreprise 32473, réservé à la documentation
+# par la RFC 5612). Le profil de repli ne relève que le total.
+profil = "printer-mib"
+appareil = "marque sans profil (fictif)"
+
+releve = """
+1.3.6.1.2.1.1.2.0 = OID: 1.3.6.1.4.1.32473.1.1
+1.3.6.1.2.1.43.10.2.1.4.1.1 = Counter32: 48213
+"""
+
+[attendu]
+total = 48213

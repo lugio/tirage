@@ -30,7 +30,7 @@
   pilote, recto-verso, format, statut, application. Les travaux attendent sur disque l'accusé de réception du serveur.
 - **Copieurs relevés en SNMP** : compteurs N&amp;B et couleur, toners et autres consommables, alertes traduites et
   classées ; pages réellement produites entre deux relevés, copies comprises. Printer-MIB (RFC 3805) et profils de
-  marque en fichiers TOML, ajoutés sans recompiler.
+  marque en fichiers TOML, ajoutés sans recompiler : [ajouter sa marque](docs/guides/printer-profiles.md).
 - **Tableaux** : par utilisateur, service, cabinet, copieur, format, application ; activité par jour et par heure ;
   comparaison de périodes ; feuilles évitées par le recto-verso ; palmarès ; export CSV.
 - **Coûts** : prix par page N&amp;B et couleur, général ou par copieur, saisi dans l'interface.
@@ -96,8 +96,8 @@ Depuis les sources : `cargo build --release --workspace` (chaîne fixée dans `r
 |---|---|
 | `crates/tirage-modele` | Format d'échange versionné (travaux, relevés) |
 | `crates/tirage-file` | File d'attente sur disque |
-| `crates/tirage-snmp` | Client SNMP et profils de marque |
-| `crates/tirage-collecteur` | Service Windows : spouleur et SNMP |
+| `crates/tirage-snmp` | Client SNMP (lecture seule) |
+| `crates/tirage-collecteur` | Service Windows : spouleur et SNMP ; profils de marque dans `profils/` |
 | `crates/tirage-serveur` | Réception, stockage, interface web |
 | `docs/architecture` | Décisions d'architecture |
 | `docs/guides` | Guides d'installation et d'exploitation |
@@ -113,7 +113,8 @@ Depuis les sources : `cargo build --release --workspace` (chaîne fixée dans `r
 
 ## Contribuer
 
-Tickets et demandes de fusion bienvenus : voir [CONTRIBUTING.md](CONTRIBUTING.md). Une faille se signale en privé,
+Tickets et demandes de fusion bienvenus : voir [CONTRIBUTING.md](CONTRIBUTING.md). Le plus simple pour aider : un
+[profil pour la marque de son copieur](docs/guides/printer-profiles.md), un fichier texte vérifié par la CI. Une faille se signale en privé,
 comme décrit dans [SECURITY.md](SECURITY.md).
 
 ## Licence
