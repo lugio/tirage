@@ -1,5 +1,6 @@
 //! Le vrai client LDAP contre un petit serveur LDAP fictif (TCP local, avec ou sans TLS) : identités et groupe
-//! inventés, aucun annuaire réel.
+//! inventés, aucun annuaire réel. Les chemins vont en chaînes TOML littérales ('…') : un chemin Windows
+//! entre guillemets doubles se lirait comme des échappements (`\U…`).
 
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -237,7 +238,7 @@ fn conf(d: &tempfile::TempDir, url: &str, plus: &str, mdp_compte: &str) -> Confi
     std::fs::write(&f, format!("{mdp_compte}\n")).unwrap();
     Config::lire(&format!(
         "ecoute = \"x\"\nbase = \"b\"\n[annuaire]\nurl = \"{url}\"\nbase = \"DC=example,DC=org\"\n\
-         compte = \"{COMPTE}\"\nmot_de_passe_fichier = \"{}\"\ngroupe_autorise = \"{GROUPE}\"\n{plus}",
+         compte = \"{COMPTE}\"\nmot_de_passe_fichier = '{}'\ngroupe_autorise = \"{GROUPE}\"\n{plus}",
         f.display()
     ))
     .unwrap()
@@ -485,8 +486,8 @@ fn programme_complet_connexion_fiche_et_journal() {
     std::fs::write(
         &config,
         format!(
-            "ecoute = \"{adresse}\"\nbase = \"{}\"\n[annuaire]\nurl = \"{url}\"\nldap_en_clair = true\n\
-             base = \"DC=example,DC=org\"\ncompte = \"{COMPTE}\"\nmot_de_passe_fichier = \"{}\"\n\
+            "ecoute = \"{adresse}\"\nbase = '{}'\n[annuaire]\nurl = \"{url}\"\nldap_en_clair = true\n\
+             base = \"DC=example,DC=org\"\ncompte = \"{COMPTE}\"\nmot_de_passe_fichier = '{}'\n\
              groupe_autorise = \"{GROUPE}\"\n[interface]\nhttp_en_clair = true\n",
             base.display(),
             secret.display()
@@ -610,7 +611,7 @@ fn ldaps_avec_la_bonne_autorite() {
     let d = tempfile::tempdir().unwrap();
     let ca = d.path().join("ca.pem");
     std::fs::write(&ca, pem).unwrap();
-    let c = conf(&d, &url, &format!("ca = \"{}\"\n", ca.display()), MDP_COMPTE);
+    let c = conf(&d, &url, &format!("ca = '{}'\n", ca.display()), MDP_COMPTE);
     let a = Ldap::nouveau(c.annuaire.as_ref().unwrap()).unwrap();
     assert_eq!(a.authentifier("membre", MDP_MEMBRE).unwrap().login, "Membre");
     assert_eq!(trace.lock().unwrap().liaisons.len(), 2);
@@ -626,7 +627,7 @@ fn ldaps_refuse_un_certificat_inconnu_avant_tout_envoi() {
     let autre = rcgen::generate_simple_self_signed(vec!["localhost".to_owned()]).unwrap();
     let ca = d.path().join("autre.pem");
     std::fs::write(&ca, autre.cert.pem()).unwrap();
-    let c = conf(&d, &url, &format!("ca = \"{}\"\n", ca.display()), MDP_COMPTE);
+    let c = conf(&d, &url, &format!("ca = '{}'\n", ca.display()), MDP_COMPTE);
     let a = Ldap::nouveau(c.annuaire.as_ref().unwrap()).unwrap();
     assert!(matches!(
         a.authentifier("membre", MDP_MEMBRE),
