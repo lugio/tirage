@@ -4,7 +4,7 @@ description = "File d'attente sur disque du collecteur : aucun événement perdu
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license-file.workspace = true
+license.workspace = true
 publish.workspace = true
 
 [dev-dependencies]

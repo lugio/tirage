@@ -1,0 +1,42 @@
+name: Bug report / Anomalie
+description: Something does not work as documented. / Quelque chose ne marche pas comme documenté.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **No real data, please.** Replace user, workstation, queue, host and document names with fictitious ones
+        (`a.example`, `PRINTER-1`, `192.0.2.10`) in logs and screenshots.
+        **Aucune donnée réelle.** Remplacer noms de personnes, postes, files, hôtes et documents par des valeurs fictives.
+  - type: dropdown
+    id: composant
+    attributes:
+      label: Component / Composant
+      options: [Server / Serveur, Collector / Collecteur, SNMP, Web interface / Interface, Documentation]
+    validations: { required: true }
+  - type: input
+    id: version
+    attributes:
+      label: Version (`--version`)
+    validations: { required: true }
+  - type: textarea
+    id: constat
+    attributes:
+      label: What happened, and what did you expect? / Constat et attendu
+    validations: { required: true }
+  - type: textarea
+    id: reproduire
+    attributes:
+      label: Steps to reproduce / Pour reproduire
+      placeholder: "1. …\n2. …"
+    validations: { required: true }
+  - type: textarea
+    id: environnement
+    attributes:
+      label: Environment / Environnement
+      placeholder: "OS, copier model and SNMP profile, directory type (AD, OpenLDAP)…"
+  - type: textarea
+    id: journal
+    attributes:
+      label: Logs (anonymised) / Journal (anonymisé)
+      render: text
