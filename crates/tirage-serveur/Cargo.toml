@@ -13,13 +13,13 @@ serde = { workspace = true }
 serde_json = { workspace = true, features = ["raw_value"] }
 axum = { version = "0.8", default-features = false, features = ["form", "http1", "json", "query", "tokio"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
-rusqlite = { version = "0.41", features = ["bundled"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
 toml = { version = "1.2", default-features = false, features = ["parse", "serde", "std"] }
 sha2 = "0.11"
 getrandom = "0.4"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 ldap3 = { version = "0.12", default-features = false, features = ["sync", "tls-rustls-ring"] }
-jiff = { version = "0.2", default-features = false, features = ["std", "tzdb-bundle-always"] }
+jiff = { version = "1.0", default-features = false, features = ["std", "tzdb-bundle-always"] }
 
 [dev-dependencies]
 tirage-collecteur = { path = "../tirage-collecteur" }
